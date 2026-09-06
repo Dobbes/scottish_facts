@@ -10,30 +10,33 @@ Already complete:
 - Clean Python 3.12 installation succeeds.
 - All local tests and static checks pass.
 - Live OpenAI web research, citations, embeddings, and style generation have been validated.
+- The public GitHub repository is populated and local `main` tracks `origin/main`.
 - No real SMS has been sent.
 
 Still required from the owner:
 
-- Create the public GitHub repository.
 - Create and configure Supabase.
 - Create and register the Twilio sender.
 - Confirm recipient consent.
 - Store credentials in local `.env` and GitHub Actions secrets.
 - Authorize the first production SMS explicitly after dry-run validation.
 
-## 1. Create The GitHub Repository
+## 1. Verify The GitHub Repository
 
-Create a public GitHub repository, preferably named `scotland-facts`. Do not add a README, `.gitignore`, or license through GitHub because this local project already contains its files.
+The public repository is already created and populated:
 
-This local directory is not currently a Git repository. After creating the empty remote repository, initialize and connect it using the commands GitHub shows for an existing local project. The sequence will resemble:
-
-```bash
-git init
-git branch -M main
-git remote add origin https://github.com/YOUR_ACCOUNT/scotland-facts.git
+```text
+https://github.com/Dobbes/scottish_facts
 ```
 
-Do not commit or push yet. Credentials must be configured locally and the tracked-file audit must be run first.
+The local `main` branch tracks `origin/main`. Verify it when needed with:
+
+```bash
+git status --short --branch
+git remote -v
+```
+
+Credentials and local environment files are not tracked. Continue to audit every future staged change before pushing.
 
 ## 2. Confirm The OpenAI Project
 
@@ -281,9 +284,9 @@ RECIPIENT_NUMBER
 
 Use GitHub Actions secrets, not repository variables. Do not add model defaults as secrets unless you intentionally want to override them.
 
-## 14. Audit And Push The Repository
+## 14. Audit Future Repository Changes
 
-Before the first commit, verify ignored and tracked content:
+Before every future commit, verify ignored and tracked content:
 
 ```bash
 git status --short --ignored
@@ -312,7 +315,7 @@ Confirm none of these are staged:
 - sender or recipient phone numbers,
 - screenshots containing account details.
 
-Only then create the first commit and push using your preferred Git workflow.
+Only then commit and push the intended update using your preferred Git workflow.
 
 ## 15. Run The GitHub Actions Dry Run
 
@@ -456,13 +459,11 @@ If a Twilio create call times out ambiguously, do not manually retry that day's 
 
 The immediate owner actions are:
 
-1. Create the empty public GitHub repository.
-2. Create Supabase and securely provide `SUPABASE_DB_URL` through local `.env`.
-3. Run migration twice, doctor, and the persisted dry run.
-4. Create and register the Twilio sender and API key.
-5. Confirm recipient consent and configure Twilio values.
-6. Run `doctor --live` without sending.
-7. Add all seven GitHub Actions secrets.
-8. Audit, commit, and push the repository.
-9. Run the GitHub Actions dry run.
-10. Explicitly authorize one controlled production SMS only when ready.
+1. Create Supabase and securely provide `SUPABASE_DB_URL` through local `.env`.
+2. Run migration twice, doctor, and the persisted dry run.
+3. Create and register the Twilio sender and API key.
+4. Confirm recipient consent and configure Twilio values.
+5. Run `doctor --live` without sending.
+6. Add all seven GitHub Actions secrets.
+7. Run the GitHub Actions dry run.
+8. Explicitly authorize one controlled production SMS only when ready.
