@@ -1,5 +1,7 @@
 # Scotland Facts
 
+[Privacy Policy](#privacy-policy) | [Terms and Conditions](#terms-and-conditions)
+
 Scotland Facts is a scheduled Python job that researches one real Scotland fact on the web, rejects repetitive material, adds a short Cat-Facts-style suffix, and sends the result to one consenting recipient through Twilio. Supabase PostgreSQL stores the audit trail, source citations, embeddings, attempts, and delivery state.
 
 ```text
@@ -7,6 +9,28 @@ SCOTLAND FACTS: Scotland's national animal is the unicorn. Your compulsory Scott
 ```
 
 The complete message is one line, contains no URL or emoji, and is at most 300 Unicode characters.
+
+## Privacy Policy
+
+Effective September 6, 2026.
+
+Scotland Facts is a private, invitation-only informational messaging program. It collects a recipient's mobile phone number only after that person directly agrees to receive the messages. The number is used solely to deliver Scotland Facts messages, provide messaging support, honor opt-out requests, prevent duplicate sends, and diagnose delivery problems.
+
+Phone numbers are kept in restricted configuration secrets and are not stored in the Scotland Facts database or sent to OpenAI. Twilio and participating telecommunications carriers process phone numbers and message-delivery metadata only as needed to provide the messaging service. Scotland Facts does not sell, rent, or share mobile information with third parties or affiliates for marketing or promotional purposes. Opt-in data and consent are not shared with third parties except service providers required to operate the messaging program.
+
+A phone number is retained in the program configuration only while its owner remains subscribed. Reply **STOP** to opt out. The number will then be removed from the recipient configuration. Reply **HELP** for help, or open a support request at [GitHub Issues](https://github.com/Dobbes/scottish_facts/issues). Twilio's handling and retention of service data is governed by Twilio's own privacy policy.
+
+## Terms and Conditions
+
+Effective September 6, 2026.
+
+The Scotland Facts messaging program sends source-backed facts about Scotland with a short humorous suffix. Participation is invitation-only. Each recipient must directly provide affirmative consent before their number is configured. Consent is not a condition of any purchase.
+
+By opting in, a recipient agrees to receive automated SMS messages from Scotland Facts. Message frequency is up to one message per day. Message and data rates may apply. Delivery is subject to carrier availability and is not guaranteed.
+
+Reply **STOP** at any time to unsubscribe. After opting out, no further Scotland Facts messages will be sent unless the recipient later provides renewed consent and follows the carrier's opt-in process. Reply **HELP** for help, or open a support request at [GitHub Issues](https://github.com/Dobbes/scottish_facts/issues).
+
+Scotland Facts is provided for informational and entertainment purposes. Although the application uses cited web research and automated validation, it does not guarantee that every message is complete or error-free. The program may be changed, suspended, or discontinued at any time.
 
 ## Architecture
 
