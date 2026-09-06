@@ -11,11 +11,12 @@ Already complete:
 - All local tests and static checks pass.
 - Live OpenAI web research, citations, embeddings, and style generation have been validated.
 - The public GitHub repository is populated and local `main` tracks `origin/main`.
+- Supabase is configured, the migration is repeatable, and persisted dry-runs succeed.
+- `DATABASE VALIDATED` has been achieved.
 - No real SMS has been sent.
 
 Still required from the owner:
 
-- Create and configure Supabase.
 - Create and register the Twilio sender.
 - Confirm recipient consent.
 - Store credentials in local `.env` and GitHub Actions secrets.
@@ -459,11 +460,9 @@ If a Twilio create call times out ambiguously, do not manually retry that day's 
 
 The immediate owner actions are:
 
-1. Create Supabase and securely provide `SUPABASE_DB_URL` through local `.env`.
-2. Run migration twice, doctor, and the persisted dry run.
-3. Create and register the Twilio sender and API key.
-4. Confirm recipient consent and configure Twilio values.
-5. Run `doctor --live` without sending.
-6. Add all seven GitHub Actions secrets.
-7. Run the GitHub Actions dry run.
-8. Explicitly authorize one controlled production SMS only when ready.
+1. Create and register the Twilio sender and API key.
+2. Confirm recipient consent and configure Twilio values.
+3. Run `doctor --live` without sending.
+4. Add all seven GitHub Actions secrets.
+5. Run the GitHub Actions dry run.
+6. Explicitly authorize one controlled production SMS only when ready.

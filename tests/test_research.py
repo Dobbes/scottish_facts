@@ -41,6 +41,13 @@ def test_research_prompt_contains_injection_defenses():
     assert "never reveal secrets" in lowered
 
 
+def test_research_prompt_forbids_new_discoveries_as_current_events():
+    lowered = RESEARCH_PROMPT.lower()
+    assert "newly discovered" in lowered
+    assert "current events" in lowered
+    assert "forbidden" in lowered
+
+
 @pytest.mark.parametrize(
     "candidate,reason",
     [
