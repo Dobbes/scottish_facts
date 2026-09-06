@@ -88,6 +88,7 @@ def doctor(settings: Settings, live: bool = False) -> int:
             "twilio_account_sid",
             "twilio_api_key_sid",
             "twilio_api_key_secret",
+            "twilio_from_number",
         )
         missing_twilio = [name.upper() for name in twilio_names if not getattr(settings, name)]
         if missing_openai:
@@ -110,7 +111,11 @@ def doctor(settings: Settings, live: bool = False) -> int:
         else:
             try:
                 client = make_twilio_client(settings)
-                client.api.accounts(settings.secret("twilio_account_sid")).fetch()
+                senders = client.incoming_phone_numbers.list(
+                    phone_number=settings.secret("twilio_from_number"), limit=1
+                )
+                if not senders:
+                    raise ValueError("Configured Twilio sender is not owned by this account")
                 print("Twilio live connectivity: OK (no SMS sent)")
             except Exception as exc:
                 print(f"Twilio live connectivity: FAIL ({redact(exc)})")

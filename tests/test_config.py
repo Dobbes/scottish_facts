@@ -7,6 +7,7 @@ from scotland_facts.config import ConfigMode, ENV_FIELDS, Settings, load_setting
 
 
 def clear_settings_env(monkeypatch):
+    monkeypatch.setattr("scotland_facts.config.load_dotenv", lambda: False)
     for name in ENV_FIELDS:
         monkeypatch.delenv(name, raising=False)
 

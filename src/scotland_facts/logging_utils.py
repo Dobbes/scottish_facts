@@ -24,3 +24,5 @@ def configure_logging(verbose: bool = False) -> None:
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    # Twilio's INFO-level request logger includes account identifiers in URLs.
+    logging.getLogger("twilio").setLevel(logging.WARNING)

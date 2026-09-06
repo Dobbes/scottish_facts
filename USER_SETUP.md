@@ -13,11 +13,13 @@ Already complete:
 - The public GitHub repository is populated and local `main` tracks `origin/main`.
 - Supabase is configured, the migration is repeatable, and persisted dry-runs succeed.
 - `DATABASE VALIDATED` has been achieved.
+- Twilio API-key authentication and ownership of the configured sender are validated.
+- `EXTERNAL INTEGRATIONS VALIDATED` has been achieved.
 - No real SMS has been sent.
 
 Still required from the owner:
 
-- Create and register the Twilio sender.
+- Complete current carrier registration for the Twilio sender.
 - Confirm recipient consent.
 - Store credentials in local `.env` and GitHub Actions secrets.
 - Authorize the first production SMS explicitly after dry-run validation.
@@ -460,9 +462,8 @@ If a Twilio create call times out ambiguously, do not manually retry that day's 
 
 The immediate owner actions are:
 
-1. Create and register the Twilio sender and API key.
-2. Confirm recipient consent and configure Twilio values.
-3. Run `doctor --live` without sending.
-4. Add all seven GitHub Actions secrets.
-5. Run the GitHub Actions dry run.
-6. Explicitly authorize one controlled production SMS only when ready.
+1. Confirm recipient consent and verify the recipient if the Twilio account remains in trial mode.
+2. Complete current carrier registration for the Twilio sender.
+3. Add `RECIPIENT_NUMBER` locally and add all seven GitHub Actions secrets.
+4. Run the GitHub Actions dry run.
+5. Explicitly authorize one controlled production SMS only when ready.
