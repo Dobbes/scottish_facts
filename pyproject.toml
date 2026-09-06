@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=75,<82"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scotland-facts"
+version = "1.0.0"
+description = "A web-grounded daily Scotland fact SMS pipeline"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "emoji>=2.14,<3",
+  "openai>=2.8,<3",
+  "pgvector>=0.4,<0.5",
+  "psycopg[binary]>=3.2,<4",
+  "pydantic>=2.10,<3",
+  "python-dotenv>=1.0,<2",
+  "twilio>=9.4,<10",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<10",
+  "pytest-cov>=6,<8",
+  "PyYAML>=6.0,<7",
+]
+
+[project.scripts]
+scotland-facts = "scotland_facts.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
