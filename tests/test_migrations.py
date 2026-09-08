@@ -59,3 +59,22 @@ def test_migrations_run_lexically_and_are_repeatable(monkeypatch, tmp_path):
     assert connection.executed_sql == ["select 'first';", "select 'second';"]
     assert apply_migrations("postgresql://redacted", tmp_path) == []
     assert connection.rollbacks == 0
+
+
+def test_real_incremental_security_migration_is_applied_once(monkeypatch):
+    from pathlib import Path
+
+    connection = MigrationConnection()
+    connection.applied.add("001_initial.sql")
+    monkeypatch.setattr("scotland_facts.migrations.psycopg.connect", lambda url: connection)
+    assert apply_migrations("postgresql://redacted") == ["002_subscription_and_api_security.sql"]
+    assert apply_migrations("postgresql://redacted") == []
+    sql = Path("migrations/002_subscription_and_api_security.sql").read_text(encoding="utf-8")
+    for table in ("generation_runs", "facts", "generation_attempts", "schema_migrations", "subscription_state"):
+        assert f"'{table}'" in sql
+    assert "enable row level security" in sql
+    assert "from public" in sql
+    assert "if exists (select 1 from pg_roles" in sql
+    assert "'anon', 'authenticated', 'service_role'" in sql
+    assert "force row level security" not in sql
+    assert "twilio_error_code = 21610" in sql

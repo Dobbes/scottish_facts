@@ -28,25 +28,38 @@ RESERVED_KEYWORDS = (
     "HELP",
     "INFO",
 )
+SMS_FOOTER = "Reply STOP to opt out."
 COMMAND_PATTERN = re.compile(
-    rf"\b(?:reply|text|send|respond)\b(?:\s+(?:with|using))?[\s:;,\.\-\"'()\[\]]+(?:{'|'.join(RESERVED_KEYWORDS)})\b",
+    rf"\b(?:reply|text|send|respond)\b(?:\s+(?:with|using))?"
+    rf"(?:\s+(?:the\s+)?word)?[\s:;,\.\-\"'()\[\]]+(?:{'|'.join(RESERVED_KEYWORDS)})\b",
     re.IGNORECASE,
+)
+
+# Exact reviewed prose, not a blacklist that disguised commands can evade.
+SAFE_SUFFIXES = (
+    "Your compulsory education resumes tomorrow.",
+    "The lessons never stop, apparently.",
+    "Your imaginary tartan certificate is in the post.",
+    "The bagpipe committee considers this progress.",
+    "A small round of applause from the imaginary haggis council.",
+    "Another fact for your increasingly specific quiz career.",
+    "The unicorns have declined to comment.",
+    "Your brain now has slightly more tartan in it.",
 )
 
 STYLE_SCHEMA = {
     "type": "object",
-    "properties": {"suffix": {"type": "string"}},
+    "properties": {"suffix": {"type": "string", "enum": list(SAFE_SUFFIXES)}},
     "required": ["suffix"],
     "additionalProperties": False,
 }
 
-STYLE_PROMPT = """You write ONLY the short joke/subscription suffix for a daily automated SCOTLAND FACTS text.
-Use classic Cat Facts prank energy: absurdly enthusiastic, deadpan, fake automated subscription, mildly intrusive, and silly rather than mean.
+STYLE_PROMPT = """Select ONLY one exact suffix from allowed_suffixes for a daily SCOTLAND FACTS text.
+Use absurdly enthusiastic, deadpan, silly rather than mean humor.
 The real factual sentence is supplied separately and must not be rewritten, restated, contradicted, or embellished.
 Return only a short suffix that follows it. Vary the structure and avoid recent endings.
 The suffix must be at most 90 Unicode characters including spaces and punctuation.
-Fake commands may use harmless nonsense words such as HAGGIS, BAGPIPE, THISTLE, or KILT.
-Never instruct the recipient to reply with a real Twilio keyword: STOP, STOPALL, UNSUBSCRIBE, CANCEL, END, REVOKE, OPTOUT, QUIT, START, UNSTOP, HELP, or INFO.
+Never invent or modify a suffix. Never give reply instructions, fake commands, or subscription controls.
 Do not use URLs, emoji, names, or line breaks. Prefer one sentence."""
 
 
@@ -61,11 +74,19 @@ def request_suffix(
     recent_sms: list[str],
     sleep: Callable[[float], None] = time.sleep,
 ) -> str:
+    suffix_budget = min(
+        settings.style_suffix_max_chars,
+        min(settings.sms_max_chars, 300) - len(f"SCOTLAND FACTS: {fact_text}  {SMS_FOOTER}"),
+    )
+    allowed_suffixes = [suffix for suffix in SAFE_SUFFIXES if len(suffix) <= suffix_budget]
+    if not allowed_suffixes:
+        raise StyleValidationError("No reviewed suffix fits the complete SMS character budget")
     payload = {
+        "allowed_suffixes": allowed_suffixes,
         "fact_for_context_only": fact_text,
         "recent_sms_endings_to_avoid": recent_sms[:10],
         "reserved_keywords": list(RESERVED_KEYWORDS),
-        "maximum_suffix_characters": settings.style_suffix_max_chars,
+        "maximum_suffix_characters": suffix_budget,
     }
     response = retry_openai(
         lambda: client.responses.create(
@@ -76,7 +97,10 @@ def request_suffix(
                     "type": "json_schema",
                     "name": "style_suffix",
                     "strict": True,
-                    "schema": STYLE_SCHEMA,
+                    "schema": {
+                        **STYLE_SCHEMA,
+                        "properties": {"suffix": {"type": "string", "enum": allowed_suffixes}},
+                    },
                 }
             },
             input=[
@@ -106,14 +130,21 @@ def validate_suffix(suffix: str, max_chars: int) -> str:
         raise StyleValidationError("Suffix must not contain emoji")
     if COMMAND_PATTERN.search(value):
         raise StyleValidationError("Suffix contains a real SMS control command")
+    if value not in SAFE_SUFFIXES:
+        raise StyleValidationError("Suffix must be exact reviewed prose; no generated control commands")
     return value
 
 
 def build_sms(fact_text: str, suffix: str, max_chars: int) -> str:
     prefix = "SCOTLAND FACTS:"
-    sms = f"{prefix} {fact_text} {suffix}".strip()
+    content = f"{prefix} {fact_text} {suffix}".strip()
+    # Only application-owned compliance text may introduce a control instruction.
+    if COMMAND_PATTERN.search(content):
+        raise StyleValidationError("Final SMS contains a real SMS control command")
+    sms = f"{content} {SMS_FOOTER}"
     if not sms.startswith(f"{prefix} {fact_text}"):
         raise StyleValidationError("Accepted fact was not preserved verbatim")
+    max_chars = min(max_chars, 300)
     if len(sms) > max_chars:
         raise StyleValidationError(f"Final SMS exceeds {max_chars} characters")
     if "\n" in sms or "\r" in sms:
@@ -122,6 +153,4 @@ def build_sms(fact_text: str, suffix: str, max_chars: int) -> str:
         raise StyleValidationError("Final SMS must not contain a URL")
     if emoji.emoji_list(sms):
         raise StyleValidationError("Final SMS must not contain emoji")
-    if COMMAND_PATTERN.search(sms):
-        raise StyleValidationError("Final SMS contains a real SMS control command")
     return sms

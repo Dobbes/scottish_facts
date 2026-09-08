@@ -17,6 +17,15 @@ from scotland_facts.sms import (
 
 
 class SendDB:
+    suppressed = False
+
+    def require_subscription(self):
+        if self.suppressed:
+            raise ValueError("Subscription suppressed")
+
+    def set_subscription_suppressed(self, suppressed):
+        self.suppressed = suppressed
+
     def __init__(self, trace):
         self.trace = trace
         self.status = None
@@ -26,10 +35,11 @@ class SendDB:
         self.trace.append("commit_send_attempted")
         self.status = FactStatus.SEND_ATTEMPTED
 
-    def mark_submitted(self, fact_id, sid, status):
+    def mark_submitted(self, fact_id, sid, status, app_status, error_code=None):
         self.trace.append("store_sid")
         self.sid = sid
-        self.status = FactStatus.SUBMITTED
+        self.status = app_status
+        self.error_code = error_code
 
     def update_twilio_status(self, fact_id, app_status, status, error_code=None):
         self.trace.append(f"status:{status}")
@@ -185,7 +195,7 @@ def test_reconciliation_lookup_failure_is_non_blocking():
     class BrokenDB:
         rolled_back = False
 
-        def reconciliation_candidates(self, days):
+        def reconciliation_candidates(self):
             raise RuntimeError("database unavailable")
 
         def rollback(self):
@@ -200,7 +210,7 @@ def test_reconciliation_does_not_regress_sent_to_submitted():
     class ReconcileDB:
         updated = None
 
-        def reconciliation_candidates(self, days):
+        def reconciliation_candidates(self):
             return [{"id": uuid4(), "twilio_sid": "SM123", "status": "SENT"}]
 
         def update_twilio_status(self, fact_id, status, status_text, error_code):

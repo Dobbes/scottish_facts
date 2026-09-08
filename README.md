@@ -1,36 +1,26 @@
 # Scotland Facts
 
-[Privacy Policy](#privacy-policy) | [Terms and Conditions](#terms-and-conditions)
+[Privacy Policy](docs/privacy/index.html) | [Terms and Conditions](docs/terms/index.html) | [Verbal Enrollment](docs/enrollment/index.html) | [Resubmission Guide](RESUBMISSION.md)
+
+Scotland Facts is operated by Elumsden Sole. Support: [brunslx@gmail.com](mailto:brunslx@gmail.com). The owner confirmed the exact registered identity, supplied this public support email, and authorized commit, push, and GitHub Pages publication on September 8, 2026. This does not authorize SMS sending or Twilio submission.
+
+Dedicated static public-site files are ready in `docs/`. Intended GitHub Pages URLs are **not yet published or verified by this update**. Follow [RESUBMISSION.md](RESUBMISSION.md) for publication status, provider response configuration, and corrected campaign fields. Do not use the repository root as both policy links.
 
 Scotland Facts is a scheduled Python job that researches one real Scotland fact on the web, rejects repetitive material, adds a short Cat-Facts-style suffix, and sends the result to one consenting recipient through Twilio. Supabase PostgreSQL stores the audit trail, source citations, embeddings, attempts, and delivery state.
 
 ```text
-SCOTLAND FACTS: Scotland's national animal is the unicorn. Your compulsory Scottish education will continue tomorrow.
+SCOTLAND FACTS: Scotland's national animal is the unicorn. The unicorns have declined to comment. Reply STOP to opt out.
 ```
 
 The complete message is one line, contains no URL or emoji, and is at most 300 Unicode characters.
 
 ## Privacy Policy
 
-Effective September 6, 2026.
-
-Scotland Facts is a private, invitation-only informational messaging program. It collects a recipient's mobile phone number only after that person directly agrees to receive the messages. The number is used solely to deliver Scotland Facts messages, provide messaging support, honor opt-out requests, prevent duplicate sends, and diagnose delivery problems.
-
-Phone numbers are kept in restricted configuration secrets and are not stored in the Scotland Facts database or sent to OpenAI. Twilio and participating telecommunications carriers process phone numbers and message-delivery metadata only as needed to provide the messaging service. Scotland Facts does not sell, rent, or share mobile information with third parties or affiliates for marketing or promotional purposes. Opt-in data and consent are not shared with third parties except service providers required to operate the messaging program.
-
-A phone number is retained in the program configuration only while its owner remains subscribed. Reply **STOP** to opt out. The number will then be removed from the recipient configuration. Reply **HELP** for help, or open a support request at [GitHub Issues](https://github.com/Dobbes/scottish_facts/issues). Twilio's handling and retention of service data is governed by Twilio's own privacy policy.
+The complete [Privacy Policy](docs/privacy/index.html) describes private consent records, restricted recipient configuration, manual removal and suppression, retained operational/provider data, and no marketing sharing of mobile information or consent (with a necessary service-provider exception). No automatic data deletion or inbound webhook is claimed.
 
 ## Terms and Conditions
 
-Effective September 6, 2026.
-
-The Scotland Facts messaging program sends source-backed facts about Scotland with a short humorous suffix. Participation is invitation-only. Each recipient must directly provide affirmative consent before their number is configured. Consent is not a condition of any purchase.
-
-By opting in, a recipient agrees to receive automated SMS messages from Scotland Facts. Message frequency is up to one message per day. Message and data rates may apply. Delivery is subject to carrier availability and is not guaranteed.
-
-Reply **STOP** at any time to unsubscribe. After opting out, no further Scotland Facts messages will be sent unless the recipient later provides renewed consent and follows the carrier's opt-in process. Reply **HELP** for help, or open a support request at [GitHub Issues](https://github.com/Dobbes/scottish_facts/issues).
-
-Scotland Facts is provided for informational and entertainment purposes. Although the application uses cited web research and automated validation, it does not guarantee that every message is complete or error-free. The program may be changed, suspended, or discontinued at any time.
+The complete [Terms and Conditions](docs/terms/index.html) cover voluntary automated SMS enrollment, up to one daily fact plus separate enrollment/requested service replies, rates, STOP, HELP, carrier limitations, and manual consent renewal. Support is [brunslx@gmail.com](mailto:brunslx@gmail.com); do not post personal information in public repository issues. The [verbal disclosure](docs/enrollment/index.html) is not an online signup form. Enrollment confirmation is not implemented in the CLI; the guarded manual provider procedure is in [RESUBMISSION.md](RESUBMISSION.md).
 
 ## Architecture
 
@@ -61,13 +51,13 @@ citations + embedding  pgvector similarity
        short status poll + later reconciliation
 ```
 
-There is no web server, frontend, inbound webhook, second database, or background worker.
+There is no application web server, inbound webhook, second database, or background worker. The separate dependency-free `docs/` information site is suitable for GitHub Pages and does not collect enrollment data.
 
 ## Integrity Controls
 
 The research model returns only a factual sentence, requested category, and canonical subjects. Source URLs are never trusted from model-authored JSON; they are extracted from OpenAI `url_citation` annotations and `web_search_call` source metadata. The prompt treats web pages as untrusted evidence and explicitly ignores instructions embedded in pages.
 
-The style model returns only a suffix. Application code constructs `SCOTLAND FACTS: {fact} {suffix}`, so the style stage cannot rewrite the accepted fact. Mechanical checks reject excess length, line breaks, URLs, emoji, and fake instructions using real carrier keywords such as `Reply STOP` or `Reply HELP`.
+The style model selects one exact reviewed humorous suffix from `SAFE_SUFFIXES`. Application code constructs `SCOTLAND FACTS: {fact} {suffix} Reply STOP to opt out.`, so the style stage cannot rewrite the accepted fact or the fixed compliance footer. All unlisted suffixes are rejected, including fake nonsense reply commands, Unicode disguises, and alternate opt-out phrasing. The style request reserves the footer's character budget; the complete message is validated against the configured limit and a hard 300-character cap. All reviewed suffixes fit a default 180-character fact with the footer. Generated content is checked for control commands separately before the application appends the genuine instruction. HELP and other service responses remain provider-configured, not generated jokes.
 
 Three independent repetition controls are used:
 
@@ -83,7 +73,11 @@ The daily Eastern date creates a unique database run key such as `daily:2026-09-
 
 After the complete SMS is validated, the fact is committed as `PENDING`. Immediately before Twilio message creation, it is changed to `SEND_ATTEMPTED` and that transaction is committed. Only then does the application make one `messages.create` call. It never automatically retries message creation.
 
-This deliberately favors a missed message over a duplicate. If a timeout occurs after Twilio may have accepted the request, the fact remains `SEND_ATTEMPTED`, the run fails with `TWILIO_AMBIGUOUS_SEND`, and the same daily key prevents another attempt. A successful SID is stored as `SUBMITTED`; delivery is polled briefly and recent `SUBMITTED`/`SENT` messages are reconciled once on later daily runs.
+This deliberately favors a missed message over a duplicate. If a timeout occurs after Twilio may have accepted the request, the fact remains `SEND_ATTEMPTED`, the run fails with `TWILIO_AMBIGUOUS_SEND`, and the same daily key prevents another attempt. Initial Twilio status and error code are persisted with the SID, including terminal failure or delivery. Polling does not discard known state when disabled or when fetching fails. Twilio HTTP requests have a configurable 15-second timeout and zero transport retries; the Actions job has a 15-minute timeout.
+
+`SMS_SEND_ENABLED` and `RECIPIENT_CONSENT_CONFIRMED` both default to `false`. CLI, workflow, and the send boundary require both for production; dry runs are unaffected. A phone-free singleton subscription record blocks generation and sending after manual suppression or observed Twilio error `21610`. Configuration changes and carrier opt-in never automatically clear database suppression. See the explicit renewal procedure in [USER_SETUP.md](USER_SETUP.md).
+
+`python -m scotland_facts.cli reconcile` only fetches unresolved delivery states, even while sending is disabled and without OpenAI or phone configuration. No seven-day cutoff is applied. Exit 1 means a late failure, lookup/fetch error, or unresolved/ambiguous delivery needs attention; exit 0 means all candidates were resolved without new failures (including no candidates). Failures are persisted on facts and logged, not retroactively hidden by changing the original run outcome. Production preflight blocks on failures, lookup/fetch errors, opt-outs, or SID-less ambiguity, but not on successfully fetched known-SID queued/sent messages awaiting delivery receipts. Those messages retain their truthful status and remain eligible for reconciliation. No resend is performed. SID-less ambiguous sends require manual Twilio inspection; never reset their send boundary or daily key to retry.
 
 ## Database
 
@@ -95,6 +89,8 @@ This deliberately favors a missed message over a duplicate. If a timeout occurs 
 - `schema_migrations`: migration versions applied in lexical order.
 
 Operational, GIN, partial unique, and HNSW cosine indexes support the safety queries. The HNSW index is not required for correctness at small row counts.
+
+Apply incremental `002_subscription_and_api_security.sql` to existing installations. It adds `subscription_state`, enables RLS on all five server-only tables including `schema_migrations`, and revokes public and existing `anon`, `authenticated`, and `service_role` API privileges. Absent Supabase roles are skipped for generic PostgreSQL. Use the trusted table-owner PostgreSQL login for migrations and runtime; do not use API roles. RLS is not forced, so owner access is retained. `doctor` validates RLS, API role privileges, and runtime ownership. These checks must still be run against the deployment; local tests do not prove deployed security.
 
 ## Local Setup
 
@@ -155,19 +151,19 @@ python -m pip install -e . --no-deps
 
 `.github/workflows/daily-fact.yml` installs Python 3.12, installs the package and dev dependencies, runs all tests, runs non-live doctor checks, and then chooses one path:
 
-- Scheduled events run production at `10:15 AM America/New_York`.
+- Scheduled events run production at `10:15 AM America/New_York` only when both authorization/consent variables are `true`.
 - Manual events default `dry_run` to `true`.
-- A manual event sends only when its operator explicitly sets `dry_run` to `false`.
+- A manual event sends only when its operator explicitly sets `dry_run` to `false` and both gates are `true`.
 
 The workflow has read-only repository permissions and `scotland-facts-send` concurrency with no in-progress cancellation. Database run-key uniqueness remains authoritative.
 
-Add all provider values as GitHub Actions secrets. Do not place them in repository variables, workflow command arguments, logs, or files. See [USER_SETUP.md](USER_SETUP.md) for the account-owner deployment procedure.
+Add all provider values as GitHub Actions secrets. Only the non-secret `SMS_SEND_ENABLED` and `RECIPIENT_CONSENT_CONFIRMED` switches use repository variables, defaulting off. Never place provider values in repository variables, workflow command arguments, logs, or files. See [USER_SETUP.md](USER_SETUP.md) for the account-owner deployment procedure.
 
 ## Security
 
 - `.env` is ignored and `.env.example` contains empty values only.
 - Pydantic `SecretStr` masks secrets in object representations.
-- Logs redact PostgreSQL passwords and phone-like values; they never intentionally log recipient or sender numbers.
+- Logs and traceback formatting redact configured secrets, their URL-encoded forms, PostgreSQL passwords, and phone-like values. Provider debug logging is disabled even with `--verbose`; redaction remains defense in depth, not a guarantee for arbitrary transformed secrets.
 - Recipient data is used only at the Twilio boundary and is never persisted or sent to OpenAI.
 - OpenAI storage is disabled for research and style calls.
 - Twilio uses an API key SID and secret scoped to the account, not the main Auth Token.

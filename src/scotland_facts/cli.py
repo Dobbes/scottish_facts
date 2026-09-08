@@ -14,7 +14,7 @@ from scotland_facts.embeddings import cosine_similarity, embed_text
 from scotland_facts.logging_utils import configure_logging, redact
 from scotland_facts.migrations import apply_migrations
 from scotland_facts.orchestrator import WorkflowError, run_workflow
-from scotland_facts.sms import make_twilio_client
+from scotland_facts.sms import make_twilio_client, reconcile_recent
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,6 +24,10 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = subparsers.add_parser("doctor", help="Run non-destructive environment checks")
     doctor.add_argument("--live", action="store_true", help="Validate OpenAI and Twilio connectivity")
     subparsers.add_parser("migrate", help="Apply database migrations")
+    subparsers.add_parser("reconcile", help="Fetch unresolved delivery states without sending")
+    subscription = subparsers.add_parser("subscription", help="Manually suppress or renew consent")
+    subscription.add_argument("action", choices=("suppress", "renew"))
+    subscription.add_argument("--confirm-renewed-consent", action="store_true")
     run = subparsers.add_parser("run", help="Run one daily workflow")
     run.add_argument("--dry-run", action="store_true", help="Generate and persist without Twilio")
     subparsers.add_parser("calibrate", help="Print embedding similarity calibration pairs")
@@ -51,6 +55,8 @@ def doctor(settings: Settings, live: bool = False) -> int:
     for name in secret_names:
         print(f"{name.upper()}: {'present' if getattr(settings, name) else 'not set'}")
     print("Configuration: OK")
+    print(f"SMS sending enabled: {settings.sms_send_enabled}")
+    print(f"Recipient consent confirmed: {settings.recipient_consent_confirmed}")
 
     if settings.supabase_db_url:
         try:
@@ -66,16 +72,37 @@ def doctor(settings: Settings, live: bool = False) -> int:
                         """
                         select table_name from information_schema.tables
                         where table_schema = 'public' and table_name in
-                          ('generation_runs', 'facts', 'generation_attempts', 'schema_migrations')
+                          ('generation_runs', 'facts', 'generation_attempts', 'schema_migrations', 'subscription_state')
                         """
                     ).fetchall()
                 }
-                expected = {"generation_runs", "facts", "generation_attempts", "schema_migrations"}
+                expected = {"generation_runs", "facts", "generation_attempts", "schema_migrations", "subscription_state"}
                 structure_ok = vector and expected <= tables
                 print(f"Database connection: OK")
                 print(f"Database migration: {'OK' if structure_ok else 'MISSING'}")
                 if not structure_ok:
                     failures.append("Database is connected but required migration objects are missing")
+                else:
+                    secured = conn.execute(
+                        """
+                        select bool_and(c.relrowsecurity
+                            and pg_get_userbyid(c.relowner) = current_user
+                            and not exists (
+                                select 1 from aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) a
+                                where a.grantee = 0
+                            )
+                            and not exists (
+                                select 1 from pg_roles r
+                                where r.rolname in ('anon', 'authenticated', 'service_role')
+                                  and has_table_privilege(r.oid, c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+                            ))
+                        from pg_class c join pg_namespace n on n.oid = c.relnamespace
+                        where n.nspname = 'public' and c.relname = any(%s)
+                        """, (list(expected),),
+                    ).fetchone()[0]
+                    print(f"Database server-only security: {'OK' if secured else 'FAIL'}")
+                    if not secured:
+                        failures.append("RLS/API privileges or runtime table ownership need attention")
         except Exception as exc:
             print(f"Database connection: FAIL ({redact(exc)})")
             failures.append("Database connection failed")
@@ -188,6 +215,25 @@ def main(argv: list[str] | None = None) -> int:
             applied = apply_migrations(settings.secret("supabase_db_url"))
             print("Applied migrations: " + ", ".join(applied) if applied else "No unapplied migrations")
             return 0
+        if args.command in {"reconcile", "subscription"}:
+            mode = ConfigMode.RECONCILE if args.command == "reconcile" else ConfigMode(args.action)
+            settings = load_settings(mode)
+            if args.command == "subscription" and args.action == "renew":
+                if not args.confirm_renewed_consent or not settings.recipient_consent_confirmed:
+                    raise ValueError("Renewal requires --confirm-renewed-consent and RECIPIENT_CONSENT_CONFIRMED=true")
+                if settings.sms_send_enabled:
+                    raise ValueError("Disable SMS_SEND_ENABLED before renewing consent")
+            database = Database.connect(settings)
+            try:
+                if args.command == "reconcile":
+                    problems = reconcile_recent(database, make_twilio_client(settings))
+                    print(f"Reconciliation complete; failures/errors/unresolved: {problems}; no SMS sent")
+                    return 1 if problems else 0
+                database.set_subscription_suppressed(args.action == "suppress")
+                print("Subscription suppressed" if args.action == "suppress" else "Subscription renewed; sending remains disabled")
+                return 0
+            finally:
+                database.close()
         if args.command == "run":
             mode = ConfigMode.DRY_RUN if args.dry_run else ConfigMode.PRODUCTION
             result = run_workflow(load_settings(mode), dry_run=args.dry_run)

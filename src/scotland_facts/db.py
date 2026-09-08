@@ -44,6 +44,23 @@ class Database:
     def rollback(self) -> None:
         self.conn.rollback()
 
+    def require_subscription(self) -> None:
+        row = self.conn.execute(
+            "select suppressed from subscription_state where id = true"
+        ).fetchone()
+        if not row or row["suppressed"]:
+            raise ValueError("Subscription suppressed or missing; explicit consent renewal required")
+
+    def set_subscription_suppressed(self, suppressed: bool) -> None:
+        cursor = self.conn.execute(
+            "update subscription_state set suppressed = %s, updated_at = now() where id = true",
+            (suppressed,),
+        )
+        if cursor.rowcount != 1:
+            self.conn.rollback()
+            raise ValueError("Subscription state missing; apply migrations")
+        self.conn.commit()
+
     def start_run(self, run_key: str, run_type: RunType, settings: Settings) -> RunStart:
         run_id = uuid4()
         row = self.conn.execute(
@@ -228,6 +245,7 @@ class Database:
             """
             update facts set status = 'SEND_ATTEMPTED', send_attempted_at = now()
             where id = %s and status = 'PENDING' and send_attempted_at is null
+              and exists (select 1 from subscription_state where id = true and not suppressed)
             """,
             (fact_id,),
         )
@@ -236,13 +254,18 @@ class Database:
             raise RuntimeError("Fact is not eligible for its one allowed Twilio create attempt")
         self.conn.commit()
 
-    def mark_submitted(self, fact_id: UUID, sid: str, twilio_status: str | None) -> None:
+    def mark_submitted(self, fact_id: UUID, sid: str, twilio_status: str,
+                       app_status: FactStatus, error_code: int | None = None) -> None:
         self.conn.execute(
             """
-            update facts set status = 'SUBMITTED', twilio_sid = %s, twilio_status = %s
+            update facts set status = %s, twilio_sid = %s, twilio_status = %s,
+                twilio_error_code = %s,
+                sent_at = case when %s = 'SENT' then now() else sent_at end,
+                delivered_at = case when %s = 'DELIVERED' then now() else delivered_at end
             where id = %s and status = 'SEND_ATTEMPTED'
             """,
-            (sid, twilio_status, fact_id),
+            (app_status.value, sid, twilio_status, error_code,
+             app_status.value, app_status.value, fact_id),
         )
         self.conn.commit()
 
@@ -289,14 +312,14 @@ class Database:
         )
         self.conn.commit()
 
-    def reconciliation_candidates(self, days: int = 7) -> list[dict[str, Any]]:
+    def reconciliation_candidates(self) -> list[dict[str, Any]]:
         return self.conn.execute(
             """
             select id, twilio_sid, status from facts
-            where status in ('SUBMITTED', 'SENT') and twilio_sid is not null
-              and generated_at >= now() - (%s * interval '1 day')
+            where (status in ('SUBMITTED', 'SENT') and twilio_sid is not null)
+               or status = 'SEND_ATTEMPTED'
+            order by generated_at
             """,
-            (days,),
         ).fetchall()
 
     def history(self, limit: int) -> list[dict[str, Any]]:

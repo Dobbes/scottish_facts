@@ -4,6 +4,10 @@ This is the current owner checklist for moving the completed code from local val
 
 ## Current Status
 
+For the rejected SMS campaign, start with [RESUBMISSION.md](RESUBMISSION.md). Scotland Facts is operated by Elumsden Sole, the exact registered identity confirmed by the owner on September 8, 2026. Public support: [brunslx@gmail.com](mailto:brunslx@gmail.com). The owner authorized commit, push, and GitHub Pages publication, not SMS sending, production enablement, or Twilio submission. Dedicated privacy, terms, and verbal-enrollment files exist under `docs/`; their intended Pages URLs are **not yet published or verified by this update**. GitHub CLI authentication currently blocks Pages configuration. Enrollment confirmation is **not implemented in the CLI**; adopt and verify the guarded manual provider procedure before claiming a confirmation flow.
+
+The entries below describe prior project validation, not validation of this safety update. Migration `002`, deployed RLS/API permissions, current carrier approval, consent, inbound STOP/HELP behavior, and production delivery have NOT been checked by this update. Keep both delivery switches off until the updated checklist is complete.
+
 Already complete:
 
 - Application, migration, CLI, tests, workflow, and documentation are implemented.
@@ -103,7 +107,7 @@ On this Windows machine, use the validated Python 3.12 virtual environment:
 & ".venv\Scripts\python.exe" -m scotland_facts.cli migrate
 ```
 
-The first command should apply `001_initial.sql`. The second must report:
+The first command applies any missing migrations, including `002_subscription_and_api_security.sql` on an existing installation. The second must report:
 
 ```text
 No unapplied migrations
@@ -115,12 +119,14 @@ Then run:
 & ".venv\Scripts\python.exe" -m scotland_facts.cli doctor
 ```
 
-Doctor should report a successful database connection and migration structure.
+Doctor should report a successful database connection, migration structure, and server-only security. Use the trusted table-owner PostgreSQL login for both migration and runtime. RLS allows owner bypass but denies API clients; never use `anon`, `authenticated`, or `service_role` as this login.
 
 In Supabase, verify:
 
-- `schema_migrations` contains `001_initial.sql` once.
-- `generation_runs`, `facts`, and `generation_attempts` exist.
+- `schema_migrations` contains both `001_initial.sql` and `002_subscription_and_api_security.sql` once.
+- `generation_runs`, `facts`, `generation_attempts`, and `subscription_state` exist.
+- All five public tables have RLS enabled and no grants to PUBLIC or existing `anon`, `authenticated`, or `service_role` roles. Confirm actual REST/API access is denied using your deployment's API credentials, without exposing them in logs.
+- The runtime owner can read/write these tables (verify via persisted dry run); no public-access RLS policies were added.
 - The `vector` extension exists in the `extensions` schema.
 - `facts.embedding` is `extensions.vector(1536)`.
 - The facts table has the HNSW cosine, GIN subjects, status, category, date, and partial normalized-fact indexes.
@@ -210,7 +216,9 @@ Confirm that the intended recipient:
 - expects one Scotland Facts message each day,
 - agrees to receive automated messages from the Twilio sender,
 - understands normal messaging rates may apply,
-- knows not to follow joke commands as if they were real carrier commands.
+- understands real STOP opt-out and HELP support behavior, as configured in Twilio.
+
+Use the complete [verbal enrollment disclosure](docs/enrollment/index.html), identifying Elumsden Sole as the operator of Scotland Facts and brunslx@gmail.com as support, after publishing its linked policies. Record dated affirmative consent privately outside this repository/database, including the sender, frequency, rates, STOP/HELP disclosure, policy/disclosure version, and affirmative response. Follow the separate confirmation procedure in [RESUBMISSION.md](RESUBMISSION.md). Set `RECIPIENT_CONSENT_CONFIRMED=true` only after consent evidence exists. This switch is an operator assertion, not automatic proof of consent. Leave `SMS_SEND_ENABLED=false` until explicit production authorization.
 
 Store the recipient's E.164 number only as:
 
@@ -222,7 +230,7 @@ Never store it in PostgreSQL, source code, documentation, screenshots, commits, 
 
 ## 11. Understand Twilio Control Keywords
 
-The application mechanically rejects fake instructions that use real Twilio control keywords, including:
+Configure and verify Twilio's genuine opt-out and help handling for your sender/service before enabling delivery. Relevant provider keywords include:
 
 ```text
 STOP
@@ -239,9 +247,24 @@ HELP
 INFO
 ```
 
-Do not encourage the recipient to send these words as part of the joke. A harmless generated command may say `Reply HAGGIS`, because it does not collide with a real control keyword.
+No fake reply commands are allowed, including nonsense words such as HAGGIS. The model selects exact reviewed prose only. Each daily message now ends with fixed application-owned `Reply STOP to opt out.` text, separate from suffix validation and included in the complete 300-character budget. Give the full genuine disclosure at enrollment and configure provider responses as described in [RESUBMISSION.md](RESUBMISSION.md). Keyword availability and response customization depend on the actual sender and provider path; this list is not proof of deployed configuration. START/UNSTOP can clear a provider block but cannot automatically renew this application's subscription, even if the native response says otherwise.
 
-If the recipient accidentally opts out, use the current opt-in mechanism shown in the Twilio Console and Twilio documentation. Do not add a custom bypass to this application.
+There is no inbound webhook. The owner must monitor Twilio incoming messages and support requests at brunslx@gmail.com before every scheduled send. Configure the genuine HELP response with this support email. If monitoring cannot be maintained, keep sending disabled. Twilio's STOP handling provides the provider-side block; the application additionally persists suppression if it observes error `21610` during create, poll, or reconciliation. That is a fallback, not immediate inbound processing.
+
+On STOP or any direct opt-out request:
+
+1. Set `SMS_SEND_ENABLED=false` and `RECIPIENT_CONSENT_CONFIRMED=false` locally and in GitHub repository variables. Disable the workflow and let any in-flight job finish; an already submitted message cannot be recalled.
+2. Run `python -m scotland_facts.cli subscription suppress` with database credentials. Verify success. If the database is unavailable, keep the workflow disabled and retry suppression when available.
+3. Remove `RECIPIENT_NUMBER` from local configuration and GitHub Actions secrets. Never post the number in a support issue.
+4. Retain only the private consent/withdrawal record needed for operations. The database suppression row stores no phone and applies to the whole single-recipient installation.
+
+Renewal is never automatic, even after START/UNSTOP or a configuration change:
+
+1. Keep sending disabled and obtain fresh affirmative consent, recorded privately. Follow Twilio's current carrier opt-in procedure; never bypass a provider block.
+2. Reconcile and inspect outstanding deliveries before renewal. An old `21610` discovered later conservatively suppresses the entire subscription again.
+3. Restore the verified recipient configuration and set `RECIPIENT_CONSENT_CONFIRMED=true` locally and in GitHub. Keep `SMS_SEND_ENABLED=false`.
+4. Run `python -m scotland_facts.cli subscription renew --confirm-renewed-consent`. It requires confirmed consent and sending disabled. This is the only application command that clears suppression.
+5. Repeat the dry-run/registration/owner authorization checks before setting `SMS_SEND_ENABLED=true` in the environment that will send.
 
 ## 12. Add Twilio Values Locally
 
@@ -286,6 +309,8 @@ RECIPIENT_NUMBER
 ```
 
 Use GitHub Actions secrets, not repository variables. Do not add model defaults as secrets unless you intentionally want to override them.
+
+Separately create the non-secret repository variables `SMS_SEND_ENABLED=false` and `RECIPIENT_CONSENT_CONFIRMED=false`. Only set them to `true` at the documented consent/authorization steps. Missing variables remain off. Match these switches in local `.env` when operating locally; GitHub variables do not control a local process.
 
 ## 14. Audit Future Repository Changes
 
@@ -357,7 +382,7 @@ Before authorizing, confirm:
 - recipient consent is current,
 - no production run has already occurred on the current Eastern date.
 
-Then explicitly authorize one production test. It can be run locally:
+Then explicitly authorize one production test by setting `SMS_SEND_ENABLED=true` and `RECIPIENT_CONSENT_CONFIRMED=true` in the sending environment. Both switches are enforced by application code, not just Actions conditions. Persisted suppression must also be clear. It can be run locally:
 
 ```powershell
 & ".venv\Scripts\python.exe" -m scotland_facts.cli run
@@ -429,17 +454,17 @@ GitHub may disable scheduled workflows in a public repository after 60 days with
 
 ## 20. Pause Or Resume Delivery
 
-To pause:
+To pause, set `SMS_SEND_ENABLED=false` in GitHub variables and local configuration. Also disable the scheduled workflow:
 
 ```text
 Actions -> Daily Scotland Fact -> Disable workflow
 ```
 
-To resume, return to the same workflow and select `Enable workflow`. Confirm that recipient consent and all provider credentials are still valid before enabling it.
+To resume, confirm consent, provider approval, monitoring, and credentials before enabling the workflow and setting `SMS_SEND_ENABLED=true`. A STOP suppression requires the explicit renewal procedure above, not merely enabling the workflow.
 
 ## 21. Change The Recipient
 
-Update only the `RECIPIENT_NUMBER` GitHub Actions secret and, if testing locally, the ignored `.env` value. Confirm the new recipient's consent before enabling delivery.
+Pause all jobs, suppress the old subscription, and remove its recipient configuration first. Follow the full fresh-consent and explicit renewal procedure for the new recipient before changing `RECIPIENT_NUMBER` locally and in GitHub. The singleton suppression is deliberately not keyed by a stored phone; changing a number does not bypass it. Resolve old outstanding deliveries before changing recipients.
 
 Do not edit source code or database rows with a phone number.
 
@@ -451,19 +476,22 @@ Useful non-sending commands:
 & ".venv\Scripts\python.exe" -m scotland_facts.cli doctor
 & ".venv\Scripts\python.exe" -m scotland_facts.cli doctor --live
 & ".venv\Scripts\python.exe" -m scotland_facts.cli history --limit 10
+& ".venv\Scripts\python.exe" -m scotland_facts.cli reconcile
 & ".venv\Scripts\python.exe" -m scotland_facts.cli calibrate
 ```
 
 `calibrate` incurs embedding API usage. `history` prints no phone data. Neither command sends SMS.
 
-If a Twilio create call times out ambiguously, do not manually retry that day's run. The application deliberately leaves the fact as `SEND_ATTEMPTED` because Twilio may have accepted it. The next Eastern calendar day proceeds normally.
+`reconcile` validates only database/Twilio credentials and the HTTP timeout; `subscription suppress` validates only database configuration. Malformed generation settings or send gates do not prevent these operational commands. Renewal additionally validates the consent and disabled-send prerequisites. None of these commands generates or sends. Reconciliation exit 1 reports newly observed failures, errors, or still-unresolved messages; exit 0 means no outstanding candidates or all candidates resolved without a new failure. Late failures remain on the fact's status/error fields even though the original generation run may have succeeded. Daily preflight blocks on failures, errors, opt-outs, or SID-less ambiguity, but known-SID queued/sent messages successfully fetched without errors do not block future days merely because delivery receipts are unavailable. Their statuses remain truthful and reconciliation continues. A claimed daily key remains a no-op even after remediation that day.
+
+If a Twilio create call times out ambiguously, do not retry it. The fact remains `SEND_ATTEMPTED` because Twilio may have accepted it. SID-less ambiguous records are reported by `reconcile` and block production until manually investigated. Inspect Twilio Console by time/sender/recipient privately. With verified evidence, an owner may attach the existing Message SID and its correct status to the fact, or mark it failed only when non-acceptance is established. Do not reset it to PENDING, clear `send_attempted_at`, delete a daily run key, or create a replacement SMS. If acceptance cannot be established, keep sending paused. No age cutoff or automatic expiry dismisses unresolved messages.
 
 ## What To Complete Next
 
-The immediate owner actions are:
+The immediate owner actions are (see [RESUBMISSION.md](RESUBMISSION.md) for precise fields, intended URLs, and provider templates):
 
-1. Confirm recipient consent and verify the recipient if the Twilio account remains in trial mode.
-2. Complete current carrier registration for the Twilio sender.
-3. Add `RECIPIENT_NUMBER` locally and add all seven GitHub Actions secrets.
+1. Complete the authorized publication of the reviewed `docs/` site and check every public policy/enrollment URL while logged out. The owner has confirmed Elumsden Sole and public support brunslx@gmail.com; see RESUBMISSION.md for the authentication blocker.
+2. Verify actual STOP/START/HELP responses, adopt a supported confirmation procedure, and resubmit the corrected campaign. Wait for approval; confirm private recipient consent and trial-recipient verification if applicable.
+3. Apply migration `002`, verify deployed security, add credentials, and configure both gates initially off.
 4. Run the GitHub Actions dry run.
 5. Explicitly authorize one controlled production SMS only when ready.

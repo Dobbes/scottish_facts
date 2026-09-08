@@ -71,6 +71,8 @@ def run_workflow(
     sleep: Any = time.sleep,
     monotonic: Any = time.monotonic,
 ) -> WorkflowResult:
+    if not dry_run:
+        settings.require_sending()
     owns_db = db is None
     database = db or Database.connect(settings)
     run_type = RunType.DRY_RUN if dry_run else RunType.DAILY
@@ -87,11 +89,14 @@ def run_workflow(
         )
 
     try:
-        ai = openai_client or make_openai_client(settings)
         twilio = None
         if not dry_run:
+            database.require_subscription()
             twilio = twilio_client or make_twilio_client(settings)
-            reconcile_recent(database, twilio)
+            if reconcile_recent(database, twilio, count_unresolved=False):
+                raise ValueError("Delivery reconciliation needs attention; run reconcile")
+            database.require_subscription()
+        ai = openai_client or make_openai_client(settings)
         result = _execute_owned(
             database,
             settings,

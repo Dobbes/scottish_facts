@@ -22,6 +22,7 @@ concurrency:
 jobs:
   daily-fact:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
@@ -30,6 +31,8 @@ jobs:
       TWILIO_API_KEY_SECRET: ${{ secrets.TWILIO_API_KEY_SECRET }}
       TWILIO_FROM_NUMBER: ${{ secrets.TWILIO_FROM_NUMBER }}
       RECIPIENT_NUMBER: ${{ secrets.RECIPIENT_NUMBER }}
+      SMS_SEND_ENABLED: ${{ vars.SMS_SEND_ENABLED || 'false' }}
+      RECIPIENT_CONSENT_CONFIRMED: ${{ vars.RECIPIENT_CONSENT_CONFIRMED || 'false' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -45,11 +48,11 @@ jobs:
       - name: Run non-live doctor checks
         run: python -m scotland_facts.cli doctor
       - name: Run scheduled production delivery
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' && env.SMS_SEND_ENABLED == 'true' && env.RECIPIENT_CONSENT_CONFIRMED == 'true'
         run: python -m scotland_facts.cli run
       - name: Run manual dry-run
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run
         run: python -m scotland_facts.cli run --dry-run
       - name: Run manual production delivery
-        if: github.event_name == 'workflow_dispatch' && !inputs.dry_run
+        if: github.event_name == 'workflow_dispatch' && !inputs.dry_run && env.SMS_SEND_ENABLED == 'true' && env.RECIPIENT_CONSENT_CONFIRMED == 'true'
         run: python -m scotland_facts.cli run

@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+from scotland_facts.logging_utils import register_secrets
 
 
 class ConfigMode(StrEnum):
@@ -15,6 +16,9 @@ class ConfigMode(StrEnum):
     MIGRATE = "migrate"
     CALIBRATE = "calibrate"
     HISTORY = "history"
+    RECONCILE = "reconcile"
+    SUPPRESS = "suppress"
+    RENEW = "renew"
 
 
 class Settings(BaseModel):
@@ -33,6 +37,9 @@ class Settings(BaseModel):
     style_suffix_max_chars: int = Field(default=90, ge=1)
     sms_max_chars: int = Field(default=300, ge=1)
     twilio_status_poll_seconds: int = Field(default=30, ge=0)
+    twilio_http_timeout_seconds: int = Field(default=15, ge=1, le=60)
+    sms_send_enabled: bool = False
+    recipient_consent_confirmed: bool = False
     twilio_status_poll_interval_seconds: int = Field(default=2, ge=1)
 
     openai_api_key: SecretStr | None = None
@@ -54,6 +61,8 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def validate_embedding_contract(self) -> "Settings":
+        register_secrets([value.get_secret_value() for value in self.__dict__.values()
+                          if isinstance(value, SecretStr)])
         if self.embedding_model == "text-embedding-3-small" and self.embedding_dimensions != 1536:
             raise ValueError("text-embedding-3-small must use 1536 dimensions")
         return self
@@ -74,11 +83,25 @@ class Settings(BaseModel):
             ConfigMode.MIGRATE: ("supabase_db_url",),
             ConfigMode.CALIBRATE: ("openai_api_key",),
             ConfigMode.HISTORY: ("supabase_db_url",),
+            ConfigMode.SUPPRESS: ("supabase_db_url",),
+            ConfigMode.RENEW: ("supabase_db_url",),
+            ConfigMode.RECONCILE: (
+                "supabase_db_url", "twilio_account_sid", "twilio_api_key_sid",
+                "twilio_api_key_secret",
+            ),
         }
         missing = [name.upper() for name in required[mode] if not getattr(self, name)]
         if missing:
             raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+        if mode == ConfigMode.PRODUCTION:
+            self.require_sending()
         return self
+
+    def require_sending(self) -> None:
+        if not self.sms_send_enabled:
+            raise ValueError("SMS_SEND_ENABLED must be true for production sending")
+        if not self.recipient_consent_confirmed:
+            raise ValueError("RECIPIENT_CONSENT_CONFIRMED must be true for production sending")
 
     def secret(self, name: str) -> str:
         value = getattr(self, name)
@@ -88,6 +111,9 @@ class Settings(BaseModel):
 
 
 ENV_FIELDS = {
+    "SMS_SEND_ENABLED": "sms_send_enabled",
+    "RECIPIENT_CONSENT_CONFIRMED": "recipient_consent_confirmed",
+    "TWILIO_HTTP_TIMEOUT_SECONDS": "twilio_http_timeout_seconds",
     "APP_TIMEZONE": "app_timezone",
     "RESEARCH_MODEL": "research_model",
     "STYLE_MODEL": "style_model",
@@ -115,4 +141,19 @@ ENV_FIELDS = {
 def load_settings(mode: ConfigMode = ConfigMode.DOCTOR) -> Settings:
     load_dotenv()
     values = {field: os.environ[name] for name, field in ENV_FIELDS.items() if os.environ.get(name)}
+    register_secrets([str(value) for field, value in values.items()
+                      if field in {"openai_api_key", "supabase_db_url", "twilio_account_sid",
+                                   "twilio_api_key_sid", "twilio_api_key_secret",
+                                   "twilio_from_number", "recipient_number"}])
+    operational_fields = {
+        ConfigMode.SUPPRESS: {"supabase_db_url"},
+        ConfigMode.RENEW: {"supabase_db_url", "sms_send_enabled", "recipient_consent_confirmed"},
+        ConfigMode.RECONCILE: {
+            "supabase_db_url", "twilio_account_sid", "twilio_api_key_sid",
+            "twilio_api_key_secret", "twilio_http_timeout_seconds",
+        },
+    }
+    if mode in operational_fields:
+        values = {field: value for field, value in values.items()
+                  if field in operational_fields[mode]}
     return Settings.model_validate(values).require(mode)

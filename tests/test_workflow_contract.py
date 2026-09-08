@@ -1,8 +1,12 @@
 from pathlib import Path
 
+import yaml
+
 
 def test_workflow_contract():
     workflow = Path(".github/workflows/daily-fact.yml").read_text(encoding="utf-8")
+    events = yaml.load(workflow, Loader=yaml.BaseLoader)["on"]
+    assert set(events) == {"schedule", "workflow_dispatch"}
     assert "cron: '15 10 * * *'" in workflow
     assert "timezone: 'America/New_York'" in workflow
     assert "workflow_dispatch:" in workflow
@@ -13,6 +17,14 @@ def test_workflow_contract():
     assert "run --dry-run" in workflow
     assert "run: python -m scotland_facts.cli run" in workflow
     assert "python-version: '3.12'" in workflow
+    assert "timeout-minutes: 15" in workflow
+    assert "vars.SMS_SEND_ENABLED || 'false'" in workflow
+    assert "vars.RECIPIENT_CONSENT_CONFIRMED || 'false'" in workflow
+    conditions = [line for line in workflow.splitlines()
+                  if ("if:" in line and "!inputs.dry_run" in line)
+                  or "if: github.event_name == 'schedule'" in line]
+    assert len(conditions) == 2
+    assert all("env.SMS_SEND_ENABLED == 'true'" in line and "env.RECIPIENT_CONSENT_CONFIRMED == 'true'" in line for line in conditions)
 
 
 def test_workflow_has_read_only_permissions_and_all_secrets():

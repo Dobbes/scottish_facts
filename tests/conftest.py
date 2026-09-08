@@ -18,6 +18,8 @@ def base_settings() -> Settings:
 @pytest.fixture
 def production_settings() -> Settings:
     return Settings(
+        sms_send_enabled=True,
+        recipient_consent_confirmed=True,
         openai_api_key="test-openai-key",
         supabase_db_url="postgresql://localhost/test",
         twilio_account_sid="test-account-sid",
@@ -56,6 +58,9 @@ def research_response(fact: str, category: str, subjects: list[str]) -> SimpleNa
 
 
 class FakeDatabase:
+    def require_subscription(self):
+        pass
+
     def __init__(self) -> None:
         self.run_id = uuid4()
         self.owned = True

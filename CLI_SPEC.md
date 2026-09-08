@@ -2,6 +2,8 @@
 Version: 2.0 (audited for autonomous implementation)
 Status: Implementation-ready
 
+The [Safety Update](#safety-update) records the current production gates, subscription handling, and security requirements and overrides conflicting historical requirements below. README.md, USER_SETUP.md, and RESUBMISSION.md are the current operator references.
+
 ## 0. Prime Directive
 
 Build the complete V1 product described in this specification in one implementation pass.
@@ -59,7 +61,7 @@ These decisions are final for V1.
 - As close as practical to classic Cat Facts prank energy without copying a fixed script.
 - Silly and mildly obnoxious, not hostile.
 - Fake subscription language is encouraged.
-- Fake commands are allowed only if they do not collide with real Twilio opt-out/help keywords.
+- No fake commands are allowed. The application appends a genuine fixed STOP footer separately from the reviewed joke suffix.
 
 ### Length
 - Hard maximum: **300 Unicode characters** for the complete outgoing SMS body.
@@ -88,7 +90,7 @@ These decisions are final for V1.
 
 ### Scope exclusions
 Do not add:
-- frontend/UI,
+- application frontend/UI (a static public disclosure site in `docs/` is included for campaign review),
 - API server,
 - inbound SMS webhook,
 - reply-command handling,
@@ -1081,7 +1083,7 @@ Return only a short suffix that can follow the factual sentence.
 
 Vary the joke structure. Avoid repeating recent endings.
 
-Fake commands are allowed only with harmless nonsense words, for example HAGGIS, BAGPIPE, THISTLE, or KILT.
+Select an exact reviewed suffix from SAFE_SUFFIXES. No fake commands are allowed, including nonsense words.
 
 Never instruct the recipient to reply with any real Twilio opt-out/help keyword, including:
 STOP, STOPALL, UNSUBSCRIBE, CANCEL, END, REVOKE, OPTOUT, QUIT, START, UNSTOP, HELP, INFO.
@@ -1120,7 +1122,7 @@ No canned joke fallback.
 Construct in application code:
 
 ```python
-sms = f"SCOTLAND FACTS: {fact_text} {suffix}".strip()
+sms = f"SCOTLAND FACTS: {fact_text} {suffix} Reply STOP to opt out."
 ```
 
 Never ask the model to return the complete final SMS.
@@ -1133,7 +1135,7 @@ Mechanical validation:
 - no URL (`http://`, `https://`, `www.`)
 - no emoji
 - exact accepted `fact_text` occurs unchanged immediately after prefix
-- no obvious instruction such as `reply STOP`, `text STOP`, etc.
+- no control instruction in generated fact/suffix content; the application-owned `Reply STOP to opt out.` footer is appended separately and counted in the total length
 
 Do not attempt a brittle semantic "suffix does not duplicate the fact" mechanical rule. The suffix-only interface plus prompt instruction is the factual-integrity control.
 
@@ -1165,13 +1167,13 @@ send STOP
 reply HELP
 ```
 
-A harmless fake command such as:
+A fake command such as:
 
 ```text
 Reply HAGGIS to receive absolutely nothing.
 ```
 
-is allowed.
+is rejected. All suffixes outside the exact reviewed prose allowlist are rejected, regardless of spelling or Unicode disguises.
 
 ---
 
@@ -1268,7 +1270,7 @@ Never retry either case automatically in the same run.
 If Twilio returns a Message resource with SID:
 - persist `twilio_sid`,
 - persist returned Twilio status,
-- set app status `SUBMITTED`.
+- persist error code and map returned status to `SUBMITTED`, `SENT`, `DELIVERED`, or `FAILED`; terminal failure raises immediately.
 
 A returned SID proves Twilio created the Message resource; it does not necessarily prove handset delivery.
 
@@ -1314,10 +1316,10 @@ Do not wait indefinitely.
 ### Required lightweight reconciliation at next run
 
 At the beginning of each new daily run, before research:
-- fetch facts from the prior 7 days with Twilio SID and app status `SUBMITTED` or `SENT`,
+- fetch all unresolved facts with Twilio SID and app status `SUBMITTED` or `SENT`, without an age cutoff; report SID-less `SEND_ATTEMPTED` ambiguity for manual inspection,
 - fetch current Twilio status once per message,
 - update final delivery status where available,
-- reconciliation failure must be logged but must not prevent today's fact generation.
+- failures, errors, opt-outs, or SID-less ambiguity are logged and block today's generation pending operator attention. Successfully fetched known-SID queued/sent messages awaiting receipts remain observable and reconciled but do not block future daily generation. Standalone `reconcile` also signals those unresolved states with a nonzero exit.
 
 This gives eventual delivery observability without a webhook service.
 
@@ -1594,7 +1596,7 @@ Mock Responses API objects:
 - newline rejected
 - `Reply STOP` rejected
 - `Reply HELP` rejected
-- `Reply HAGGIS` accepted
+- `Reply HAGGIS` rejected along with every unlisted suffix
 
 ### 29.8 Idempotency
 - duplicate production run_key exits no-op
@@ -1889,3 +1891,17 @@ The coding CLI may finish the task without further questions only when it has:
 - clearly listed only external/manual actions that genuinely require account ownership or secret values.
 
 The final implementation must be capable of becoming a complete working cloud product by following `USER_SETUP.md` without requiring additional software design decisions.
+# Safety Update
+
+Current implementation overrides earlier sending/style behavior in this specification:
+
+- Production requires `SMS_SEND_ENABLED=true`, `RECIPIENT_CONSENT_CONFIRMED=true`, and an unsuppressed database subscription. Both switches default off; dry runs are unaffected.
+- `subscription suppress` persists phone-free suppression. `subscription renew --confirm-renewed-consent` clears it only with consent confirmed and sending disabled. Follow USER_SETUP.md for monitored STOP handling and renewal.
+- `reconcile` is non-sending and requires only database/Twilio API credentials. Exit 1 indicates new failure, error, unresolved delivery, or SID-less ambiguity; exit 0 indicates resolution without new failures or no candidates. Unresolved deliveries have no seven-day expiry.
+- The style model selects exact reviewed humorous prose; no fake command instructions are allowed.
+- Twilio HTTP timeout defaults to 15 seconds with zero transport retries. Initial response state/error is persisted, and terminal failures raise.
+- Apply incremental migration `002_subscription_and_api_security.sql`; `doctor` checks server-only table security and owner runtime access.
+- Daily messages always include fixed `Reply STOP to opt out.` text outside the suffix validator. Style requests reserve its budget; final validation applies the configured limit and a hard 300-character cap, including the footer. Existing persisted message history is not rewritten.
+- `docs/` is a dependency-free static information site, not an enrollment form or application backend. Scotland Facts is operated by Elumsden Sole, with public support brunslx@gmail.com. The owner confirmed that exact registered identity and authorized commit/push/Pages publication on September 8, 2026, not SMS sending or Twilio submission. See RESUBMISSION.md for publication status and the GitHub CLI authentication blocker; intended URLs are not yet published or verified by this update.
+- Enrollment confirmation is not implemented as a CLI command or automatic send. RESUBMISSION.md documents an explicitly authorized, single-operator manual provider procedure with a private attempt-before-send record and no retries on ambiguity. This does not alter the daily at-most-once send boundary.
+- Provider HELP/STOP/START configuration must be verified for actual from-number sends. No inbound command processing or automatic START renewal is implemented. All operational and public disclosures must reflect these limitations.
