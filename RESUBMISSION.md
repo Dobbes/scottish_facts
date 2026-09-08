@@ -4,12 +4,15 @@
 
 This is an owner field guide, not a submitted campaign or evidence of carrier approval. On September 8, 2026, the owner confirmed the exact registered identity Elumsden Sole, supplied public support brunslx@gmail.com, and authorized commit, push, and GitHub Pages publication. Publication authorization does not authorize SMS sending, production enablement, or Twilio submission. The intended Pages URLs below are NOT yet published or verified by this update. GitHub CLI is not authenticated, so Pages configuration is blocked; Git push can use its separate existing authentication. Do not infer that Pages is enabled or disabled from this blocker.
 
+The reviewed site and safety changes were committed as `446fada` (`Add verified operator site and messaging safety controls`) and successfully pushed to `origin/main`. Logged-out HTTP checks of all four intended URLs returned 404 on September 8, 2026; the updated site is not verified live. Complete step 2 below to configure Pages, then verify actual deployed content. No Twilio submission, SMS send, production enablement, or secret inspection was performed.
+
 - [x] Add dedicated static home, privacy, terms, and verbal-enrollment pages in `docs/`.
 - [x] Add a fixed application-owned STOP footer with complete-message length validation.
 - [x] Supply samples using actual reviewed suffixes, field guidance, and a private consent procedure.
 - [x] Document a manual enrollment-confirmation procedure; no confirmation CLI or automatic confirmation is implemented.
 - [x] Local validation: 175 tests passed; `compileall` and `git diff --check` passed (Git emitted line-ending notices only). Static content/link checks are not a browser rendering or live Pages verification.
 - [x] Owner confirms registered identity Elumsden Sole, its operation of Scotland Facts, public support brunslx@gmail.com, and commit/push/Pages authorization.
+- [x] Commit and push the 30 reviewed site, documentation, safety, migration, and test files to `origin/main`.
 - [ ] Owner publishes reviewed files and verifies all Pages links while logged out.
 - [ ] Owner configures and verifies actual STOP/START/HELP behavior and a supported confirmation procedure.
 - [ ] Owner updates the campaign fields and resubmits, then waits for approval.
