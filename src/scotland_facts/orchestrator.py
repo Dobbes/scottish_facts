@@ -139,7 +139,7 @@ def _execute_owned(
     recent_subjects = db.recent_subjects(settings.recent_subject_window_days)
     prior_facts = db.prior_facts(50)
 
-    accepted: dict[str, Any] | None = None
+    fact_id = None
     for attempt_number in range(1, settings.max_research_attempts + 1):
         category = categories[(attempt_number - 1) % len(categories)]
         record = AttemptRecord(attempt_number=attempt_number, category=category)
@@ -223,56 +223,41 @@ def _execute_owned(
             )
             continue
 
-        record.accepted = True
-        db.record_attempt(run_id, record)
-        accepted = {
-            "fact": fact_text,
-            "normalized": normalized,
-            "category": category,
-            "subjects": subjects,
-            "sources": sources,
-            "embedding": embedding,
-            "attempts": attempt_number,
-        }
-        break
+        recent_sms = db.recent_sms(10)
+        sms_text: str | None = None
+        style_errors: list[str] = []
+        for _ in range(settings.max_style_attempts):
+            try:
+                suffix = request_suffix(ai, settings, fact_text, recent_sms, sleep=sleep)
+                suffix = validate_suffix(suffix, settings.style_suffix_max_chars)
+                sms_text = build_sms(fact_text, suffix, settings.sms_max_chars)
+                break
+            except StyleValidationError as exc:
+                style_errors.append(redact(exc))
+            except Exception as exc:
+                _reject(db, run_id, record, "OPENAI_STYLE_ERROR", redact(exc))
+                db.fail_run(run_id, "OPENAI_STYLE_ERROR", redact(exc))
+                raise WorkflowError(redact(exc)) from exc
+        if sms_text is None:
+            _reject(db, run_id, record, "STYLE_EXHAUSTED", "; ".join(style_errors))
+            db.fail_run(run_id, "STYLE_EXHAUSTED", "; ".join(style_errors)[-1000:])
+            raise WorkflowError("Style generation exhausted without a valid suffix")
 
-    if accepted is None:
+        fact_id = db.try_accept_fact(
+            run_id, record, sms_text, embedding,
+            FactStatus.DRY_RUN if dry_run else FactStatus.PENDING, settings,
+        )
+        if fact_id is not None:
+            break
+        _reject(db, run_id, record, record.rejection_code, record.rejection_reason)
+        # A competing writer won after the speculative checks. Refresh context
+        # before the next bounded research attempt rather than accepting stale novelty.
+        recent_subjects = db.recent_subjects(settings.recent_subject_window_days)
+        prior_facts = db.prior_facts(50)
+
+    if fact_id is None:
         db.fail_run(run_id, "RESEARCH_EXHAUSTED", "No valid research candidate was produced")
         raise WorkflowError("Research exhausted without a valid candidate")
-
-    recent_sms = db.recent_sms(10)
-    sms_text: str | None = None
-    style_errors: list[str] = []
-    for _ in range(settings.max_style_attempts):
-        try:
-            suffix = request_suffix(ai, settings, accepted["fact"], recent_sms, sleep=sleep)
-            suffix = validate_suffix(suffix, settings.style_suffix_max_chars)
-            sms_text = build_sms(accepted["fact"], suffix, settings.sms_max_chars)
-            break
-        except StyleValidationError as exc:
-            style_errors.append(redact(exc))
-        except Exception as exc:
-            db.fail_run(run_id, "OPENAI_STYLE_ERROR", redact(exc))
-            raise WorkflowError(redact(exc)) from exc
-    if sms_text is None:
-        db.fail_run(run_id, "STYLE_EXHAUSTED", "; ".join(style_errors)[-1000:])
-        raise WorkflowError("Style generation exhausted without a valid suffix")
-
-    sources_json = [source.model_dump() for source in accepted["sources"]]
-    fact_status = FactStatus.DRY_RUN if dry_run else FactStatus.PENDING
-    fact_id = db.insert_fact(
-        run_id,
-        accepted["fact"],
-        accepted["normalized"],
-        sms_text,
-        accepted["category"],
-        accepted["subjects"],
-        accepted["sources"][0].url,
-        accepted["sources"][0].title,
-        sources_json,
-        accepted["embedding"],
-        fact_status,
-    )
 
     if dry_run:
         db.complete_run(run_id)
@@ -281,8 +266,8 @@ def _execute_owned(
             run_key=run_key,
             status=RunStatus.SUCCEEDED,
             sms_text=sms_text,
-            source_url=accepted["sources"][0].url,
-            attempts=accepted["attempts"],
+            source_url=sources[0].url,
+            attempts=attempt_number,
         )
 
     assert twilio is not None
@@ -305,6 +290,6 @@ def _execute_owned(
         run_key=run_key,
         status=RunStatus.SUCCEEDED,
         sms_text=sms_text,
-        source_url=accepted["sources"][0].url,
-        attempts=accepted["attempts"],
+        source_url=sources[0].url,
+        attempts=attempt_number,
     )

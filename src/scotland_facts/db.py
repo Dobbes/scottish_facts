@@ -12,9 +12,10 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from scotland_facts.config import Settings
+from scotland_facts.dedupe import highest_semantic_match
+from scotland_facts.fatigue import find_recent_subject
 from scotland_facts.models import (
     CATEGORIES,
-    HISTORY_STATUSES,
     AttemptRecord,
     FactStatus,
     RunStart,
@@ -98,10 +99,8 @@ class Database:
             """
             select category, max(generated_at) as last_used
             from facts
-            where status = any(%s)
             group by category
             """,
-            (list(HISTORY_STATUSES),),
         ).fetchall()
         last_used = {row["category"]: row["last_used"] for row in rows}
         return sorted(CATEGORIES, key=lambda category: (category in last_used, last_used.get(category), category))
@@ -110,10 +109,9 @@ class Database:
         rows = self.conn.execute(
             """
             select subjects from facts
-            where status = any(%s)
-              and generated_at >= now() - (%s * interval '1 day')
+            where generated_at >= now() - (%s * interval '1 day')
             """,
-            (list(HISTORY_STATUSES), window_days),
+            (window_days,),
         ).fetchall()
         return [subject for row in rows for subject in row["subjects"]]
 
@@ -121,11 +119,10 @@ class Database:
         rows = self.conn.execute(
             """
             select fact_text from facts
-            where status = any(%s)
             order by generated_at desc
             limit %s
             """,
-            (list(HISTORY_STATUSES), limit),
+            (limit,),
         ).fetchall()
         return [row["fact_text"] for row in rows]
 
@@ -133,11 +130,11 @@ class Database:
         rows = self.conn.execute(
             """
             select sms_text from facts
-            where status = any(%s) and sms_text is not null
+            where sms_text is not null
             order by generated_at desc
             limit %s
             """,
-            (list(HISTORY_STATUSES), limit),
+            (limit,),
         ).fetchall()
         return [row["sms_text"] for row in rows]
 
@@ -145,28 +142,28 @@ class Database:
         row = self.conn.execute(
             """
             select id from facts
-            where normalized_fact = %s and status = any(%s)
+            where normalized_fact = %s
             order by generated_at desc limit 1
             """,
-            (normalized_fact, list(HISTORY_STATUSES)),
+            (normalized_fact,),
         ).fetchone()
         return row["id"] if row else None
 
     def nearest_facts(self, embedding: list[float], limit: int = 5) -> list[tuple[UUID, float]]:
         query_vector = Vector(embedding)
+        # The + 0 forces an exact distance sort rather than approximate HNSW retrieval.
         rows = self.conn.execute(
             """
             select id, 1 - (embedding <=> %s) as similarity
             from facts
-            where status = any(%s)
-            order by embedding <=> %s
+            order by (embedding <=> %s) + 0
             limit %s
             """,
-            (query_vector, list(HISTORY_STATUSES), query_vector, limit),
+            (query_vector, query_vector, limit),
         ).fetchall()
         return [(row["id"], float(row["similarity"])) for row in rows]
 
-    def record_attempt(self, run_id: UUID, attempt: AttemptRecord) -> None:
+    def record_attempt(self, run_id: UUID, attempt: AttemptRecord, *, commit: bool = True) -> None:
         self.conn.execute(
             """
             insert into generation_attempts (
@@ -198,7 +195,8 @@ class Database:
             "update generation_runs set attempts = greatest(attempts, %s) where id = %s",
             (attempt.attempt_number, run_id),
         )
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
 
     def insert_fact(
         self,
@@ -213,6 +211,8 @@ class Database:
         sources: list[dict[str, Any]],
         embedding: list[float],
         status: FactStatus,
+        *,
+        commit: bool = True,
     ) -> UUID:
         fact_id = uuid4()
         self.conn.execute(
@@ -237,7 +237,49 @@ class Database:
                 status.value,
             ),
         )
+        if commit:
+            self.conn.commit()
+        return fact_id
+
+    def try_accept_fact(
+        self, run_id: UUID, record: AttemptRecord, sms_text: str,
+        embedding: list[float], status: FactStatus, settings: Settings,
+    ) -> UUID | None:
+        # End the speculative read transaction. All writers share this short lock;
+        # no provider calls or intermediate commits may occur inside it.
         self.conn.commit()
+        with self.conn.transaction():
+            self.conn.execute("set transaction isolation level read committed")
+            self.conn.execute("select pg_advisory_xact_lock(1935896436)")
+            repeated = find_recent_subject(
+                record.subjects or [], self.recent_subjects(settings.recent_subject_window_days)
+            )
+            if repeated:
+                record.rejection_code = "RECENT_SUBJECT"
+                record.rejection_reason = f"Subject claimed by another run: {repeated}"
+                return None
+            exact = self.exact_duplicate(record.normalized_fact)
+            if exact:
+                record.matched_fact_id = exact
+                record.rejection_code = "EXACT_DUPLICATE"
+                record.rejection_reason = "Normalized fact claimed by another run"
+                return None
+            duplicate, matched_id, similarity = highest_semantic_match(
+                self.nearest_facts(embedding), settings.semantic_similarity_threshold
+            )
+            record.matched_fact_id = matched_id
+            record.similarity_score = similarity
+            if duplicate:
+                record.rejection_code = "SEMANTIC_DUPLICATE"
+                record.rejection_reason = f"Similarity {similarity:.4f} meets threshold"
+                return None
+            fact_id = self.insert_fact(
+                run_id, record.candidate_fact, record.normalized_fact, sms_text,
+                record.category, record.subjects, record.source_url, record.source_title,
+                record.sources, embedding, status, commit=False,
+            )
+            record.accepted = True
+            self.record_attempt(run_id, record, commit=False)
         return fact_id
 
     def mark_send_attempted(self, fact_id: UUID) -> None:

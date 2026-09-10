@@ -104,6 +104,16 @@ class FakeDatabase:
         self.trace.append("insert_fact")
         return fact_id
 
+    def try_accept_fact(self, run_id, record, sms_text, embedding, status, settings):
+        fact_id = self.insert_fact(
+            run_id, record.candidate_fact, record.normalized_fact, sms_text,
+            record.category, record.subjects, record.source_url, record.source_title,
+            record.sources, embedding, status,
+        )
+        record.accepted = True
+        self.record_attempt(run_id, record)
+        return fact_id
+
     def complete_run(self, run_id, status=None):
         self.completed.append(run_id)
 

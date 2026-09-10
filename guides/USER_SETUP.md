@@ -1,31 +1,42 @@
-# Scotland Facts Owner Setup
+# Deployment and Operator Guide
 
 This is the current owner checklist for moving the completed code from local validation to production. Complete it in order. Do not place any credential or phone number in this repository, an issue, a commit message, or chat output.
 
 ## Current Status
 
-For the rejected SMS campaign, start with [RESUBMISSION.md](RESUBMISSION.md). Scotland Facts is operated by Elumsden Sole, the exact registered identity confirmed by the owner on September 8, 2026. Public support: [brunslx@gmail.com](mailto:brunslx@gmail.com). The owner authorized commit, push, and GitHub Pages publication, not SMS sending, production enablement, or Twilio submission. Dedicated privacy, terms, and verbal-enrollment files exist under `docs/`; their intended Pages URLs are **not yet published or verified by this update**. GitHub CLI authentication currently blocks Pages configuration. Enrollment confirmation is **not implemented in the CLI**; adopt and verify the guarded manual provider procedure before claiming a confirmation flow.
+Scotland Facts is operated by Elumsden Sole. Public support: [brunslx@gmail.com](mailto:brunslx@gmail.com). The [public site](https://dobbes.github.io/scottish_facts/) and its privacy, terms, and enrollment pages were verified accessible without authentication on September 9, 2026. For carrier registration and service-response templates, see [RESUBMISSION.md](RESUBMISSION.md). Enrollment confirmation is **not implemented in the CLI**; the guide describes the manual provider procedure.
 
-The entries below describe prior project validation, not validation of this safety update. Migration `002`, deployed RLS/API permissions, current carrier approval, consent, inbound STOP/HELP behavior, and production delivery have NOT been checked by this update. Keep both delivery switches off until the updated checklist is complete.
+Deployment checks on September 9, 2026 confirmed the database connection, required migration objects, server-only permissions/runtime ownership, and Twilio sender connectivity. The configured sender is attached to a messaging service with an A2P campaign reported as `VERIFIED`; the database subscription is active with no unresolved delivery records. The owner stores the active OpenAI key only in GitHub Secrets; the revoked local key cannot validate hosted OpenAI access. Verify that access through an Actions dry run. Provider STOP/HELP behavior and successful production delivery still require confirmation; campaign verification alone is not a delivery receipt.
+
+### GitHub-only launch
+
+1. Open [Daily Scotland Fact in Actions](https://github.com/Dobbes/scottish_facts/actions/workflows/daily-fact.yml).
+2. Click **Run workflow**, select **main**, and leave **Generate and validate without sending SMS** checked.
+3. Click the green **Run workflow** button. Open the new manual run and its **daily-fact** job.
+4. Confirm **Run manual dry-run** actually ran and succeeded. A green scheduled run with production skipped does not validate OpenAI research.
+5. After a successful dry run and confirmed recipient consent, open [Actions variables](https://github.com/Dobbes/scottish_facts/settings/variables/actions). Set `RECIPIENT_CONSENT_CONFIRMED=true` and then `SMS_SEND_ENABLED=true` to authorize daily delivery.
+6. The next scheduled run targets 10:15 AM America/New_York. GitHub may start it late. Production uses only `RECIPIENT_NUMBER`; additional number secrets are unused.
+
+Keep active credentials in Actions secrets throughout this procedure. No local OpenAI key is needed. Review incoming opt-outs and support requests before scheduled sends, as described below.
 
 Already complete:
 
 - Application, migration, CLI, tests, workflow, and documentation are implemented.
 - Clean Python 3.12 installation succeeds.
-- All local tests and static checks pass.
+- Local unit and contract tests pass; real PostgreSQL integration tests are opt-in.
 - Live OpenAI web research, citations, embeddings, and style generation have been validated.
 - The public GitHub repository is populated and local `main` tracks `origin/main`.
 - Supabase is configured, the migration is repeatable, and persisted dry-runs succeed.
 - `DATABASE VALIDATED` has been achieved.
 - Twilio API-key authentication and ownership of the configured sender are validated.
 - `EXTERNAL INTEGRATIONS VALIDATED` has been achieved.
-- No real SMS has been sent.
+- Successful production delivery has not yet been verified.
 
 Still required from the owner:
 
-- Complete current carrier registration for the Twilio sender.
+- Confirm the verified campaign and sender remain ready in Twilio.
 - Confirm recipient consent.
-- Store credentials in local `.env` and GitHub Actions secrets.
+- Verify hosted credentials through a GitHub Actions dry run. Local credentials are optional for a GitHub-only deployment.
 - Authorize the first production SMS explicitly after dry-run validation.
 
 ## 1. Verify The GitHub Repository
@@ -164,7 +175,9 @@ In Supabase, inspect the new rows:
 - `embedding` has 1536 dimensions.
 - The final SMS is one line and no longer than 300 characters.
 
-Dry-run facts intentionally do not influence production duplicate checks, category recency, or subject fatigue.
+Every persisted preview consumes content novelty: all persisted facts (`DRY_RUN`, `PENDING`, `FAILED`, and all delivery statuses) count for global exact/semantic duplicate checks, recent 14-day subjects, category ordering, prior research context, and recent SMS context. Rejected attempts do not count. A preview never claims the production daily key or populates delivery fields; those fields must remain unset.
+
+All modes use a shared PostgreSQL transaction advisory lock for atomic final novelty revalidation and insertion in a short transaction, with an exact cosine scan rather than approximate HNSW search. Concurrent collisions reject the candidate and trigger research retry within the configured attempt limit. Existing duplicate audit rows are retained, and no migration is needed for this policy.
 
 After this succeeds, tell the implementation operator that Supabase and the persisted dry-run are ready. This is the point where `DATABASE VALIDATED` can be recorded.
 
@@ -218,7 +231,7 @@ Confirm that the intended recipient:
 - understands normal messaging rates may apply,
 - understands real STOP opt-out and HELP support behavior, as configured in Twilio.
 
-Use the complete [verbal enrollment disclosure](docs/enrollment/index.html), identifying Elumsden Sole as the operator of Scotland Facts and brunslx@gmail.com as support, after publishing its linked policies. Record dated affirmative consent privately outside this repository/database, including the sender, frequency, rates, STOP/HELP disclosure, policy/disclosure version, and affirmative response. Follow the separate confirmation procedure in [RESUBMISSION.md](RESUBMISSION.md). Set `RECIPIENT_CONSENT_CONFIRMED=true` only after consent evidence exists. This switch is an operator assertion, not automatic proof of consent. Leave `SMS_SEND_ENABLED=false` until explicit production authorization.
+Use the complete [verbal enrollment disclosure](../docs/enrollment/index.html), identifying Elumsden Sole as the operator of Scotland Facts and brunslx@gmail.com as support, after publishing its linked policies. Record dated affirmative consent privately outside this repository/database, including the sender, frequency, rates, STOP/HELP disclosure, policy/disclosure version, and affirmative response. Follow the separate confirmation procedure in [RESUBMISSION.md](RESUBMISSION.md). Set `RECIPIENT_CONSENT_CONFIRMED=true` only after consent evidence exists. This switch is an operator assertion, not automatic proof of consent. Leave `SMS_SEND_ENABLED=false` until explicit production authorization.
 
 Store the recipient's E.164 number only as:
 
@@ -327,7 +340,8 @@ Review every match from the last command. There should be no assignment containi
 Also inspect staged content before committing:
 
 ```bash
-git add .
+# Stage only the specific files you reviewed:
+git add <reviewed-file-paths>
 git diff --cached --stat
 git diff --cached
 ```
@@ -488,10 +502,10 @@ If a Twilio create call times out ambiguously, do not retry it. The fact remains
 
 ## What To Complete Next
 
-The immediate owner actions are (see [RESUBMISSION.md](RESUBMISSION.md) for precise fields, intended URLs, and provider templates):
+The immediate owner actions are (see [RESUBMISSION.md](RESUBMISSION.md) for precise fields, public URLs, and provider templates):
 
-1. Complete the authorized publication of the reviewed `docs/` site and check every public policy/enrollment URL while logged out. The owner has confirmed Elumsden Sole and public support brunslx@gmail.com; see RESUBMISSION.md for the authentication blocker.
+1. Review the published policy/enrollment pages and current carrier registration state. The public pages were verified accessible on September 9, 2026.
 2. Verify actual STOP/START/HELP responses, adopt a supported confirmation procedure, and resubmit the corrected campaign. Wait for approval; confirm private recipient consent and trial-recipient verification if applicable.
-3. Apply migration `002`, verify deployed security, add credentials, and configure both gates initially off.
+3. Verify deployment secrets and both repository variables. Database migration/security checks passed on September 9, 2026; rerun after database changes.
 4. Run the GitHub Actions dry run.
 5. Explicitly authorize one controlled production SMS only when ready.

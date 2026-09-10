@@ -24,8 +24,11 @@ def _items(value: Any) -> Iterable[Any]:
 def _valid_web_url(url: Any) -> bool:
     if not isinstance(url, str):
         return False
-    parsed = urlparse(url)
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+    try:
+        parsed = urlparse(url)
+        return parsed.scheme in {"http", "https"} and bool(parsed.hostname)
+    except ValueError:
+        return False
 
 
 def extract_sources(response: Any) -> tuple[list[Source], bool]:
@@ -36,6 +39,8 @@ def extract_sources(response: Any) -> tuple[list[Source], bool]:
     for item in _items(_get(response, "output", [])):
         item_type = _get(item, "type")
         if item_type == "web_search_call":
+            if _get(item, "status", "completed") != "completed":
+                continue
             web_search_performed = True
             action = _get(item, "action", {})
             for raw_source in _items(_get(action, "sources", [])):

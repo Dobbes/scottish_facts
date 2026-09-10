@@ -20,9 +20,9 @@ def test_workflow_contract():
     assert "timeout-minutes: 15" in workflow
     assert "vars.SMS_SEND_ENABLED || 'false'" in workflow
     assert "vars.RECIPIENT_CONSENT_CONFIRMED || 'false'" in workflow
-    conditions = [line for line in workflow.splitlines()
-                  if ("if:" in line and "!inputs.dry_run" in line)
-                  or "if: github.event_name == 'schedule'" in line]
+    steps = yaml.load(workflow, Loader=yaml.BaseLoader)["jobs"]["daily-fact"]["steps"]
+    conditions = [step["if"] for step in steps
+                  if step.get("run") == "python -m scotland_facts.cli run"]
     assert len(conditions) == 2
     assert all("env.SMS_SEND_ENABLED == 'true'" in line and "env.RECIPIENT_CONSENT_CONFIRMED == 'true'" in line for line in conditions)
 

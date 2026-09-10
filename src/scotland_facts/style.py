@@ -45,6 +45,45 @@ SAFE_SUFFIXES = (
     "Another fact for your increasingly specific quiz career.",
     "The unicorns have declined to comment.",
     "Your brain now has slightly more tartan in it.",
+    "Meanwhile, I need instructions to assemble a shelf.",
+    "Subtle. Would a small plaque have killed them?",
+    "A bold choice for a country with this much wind.",
+    "Finally, a national policy with enough unicorn in it.",
+    "Imagine explaining that expense claim.",
+    "Some people leave a legacy. I leave tabs open.",
+    "Apparently 'because we can' is a heritage strategy.",
+    "That is an unreasonable amount of effort to avoid being bored.",
+    "And I thought packing a spare charger was being prepared.",
+    "Archaeology: the world's least timely invasion of privacy.",
+    "History really is a group project with no adult supervision.",
+    "An awkward day for whoever said it would never catch on.",
+    "The original version of making it your entire personality.",
+    "Nature has clearly not read the planning regulations.",
+    "A useful reminder that 'traditional' does not mean 'sensible'.",
+    "Somewhere, a pub quiz team is becoming unbearable.",
+    "Even the ruins have a better bathroom situation than my first flat.",
+    "Indoor plumbing, yet somehow we still invented the festival toilet.",
+    "The dog was unavailable for comment, having eaten the evidence.",
+    "A cat with a job. Mine won't even cover rent.",
+    "Finally, a landlord willing to admit the house is a fruit.",
+    "A pineapple with bedrooms is a fairly aggressive fruit bowl.",
+    "Nothing says 'I won the argument' like commissioning masonry.",
+    "Imagine losing an arms race to a bird.",
+    "The sheep have a more interesting commute than I do.",
+    "That is a lot of paperwork for an animal with no pockets.",
+    "Apparently the butter needed a longer lie-down than I do.",
+    "An ambitious alternative to putting it in the fridge.",
+    "Proof that the rules were written after somebody tried it.",
+    "All that engineering, and the enemy could just use the stairs.",
+    "Even the ancient board games are missing a piece. Some things never change.",
+    "Nothing ruins a fearsome reputation like a tiny chair.",
+    "An entire building devoted to not letting an argument go.",
+    "The original security system: make the burglar reconsider the walk.",
+    "Less a getaway car, more a getaway farm.",
+    "A heist with geese feels like a poor choice for a stealth mission.",
+    "Finally, a burglary where the loot can bite back.",
+    "The estate agent would probably call that a lively lower ground floor.",
+    "Even the cupboards have trust issues.",
 )
 
 STYLE_SCHEMA = {
@@ -56,6 +95,21 @@ STYLE_SCHEMA = {
 
 STYLE_PROMPT = """Select ONLY one exact suffix from allowed_suffixes for a daily SCOTLAND FACTS text.
 Use absurdly enthusiastic, deadpan, silly rather than mean humor.
+Treat the fact as the setup: identify its oddest concrete detail, then choose a suffix that pays off THAT detail.
+Use the swap test: if the ending works equally well after an unrelated castle, battle, or island fact, it is a weak choice.
+Prefer an ending that needs a particular noun or situation in this fact to make sense. A shared broad topic like 'history' is not enough.
+Prefer a sharp contrast, dry understatement, or modern comparison over generic praise or random Scottish props.
+For example, elaborate grave goods suit the spare-charger packing joke; ancient engineering suits the shelf-assembly joke.
+Unicorn policy only suits a unicorn fact; wind only suits an exposed or wind-related subject.
+Pineapple buildings suit fruit/landlord jokes; ancient drains suit plumbing jokes; spite-built monuments suit argument/masonry jokes.
+Only use these connections when the fact actually supplies the setup. Do not imply an animal, toilet, missing piece, or dispute absent from the fact.
+The animal-paperwork joke requires an official animal appointment or rank, not merely an animal. A livestock raid suits getaway-farm jokes; stolen geese suit the noisy-heist joke.
+The cat-with-a-job joke requires an actual working cat, not captive cats or a cat-shaped object. Cellar animals suit the lively-lower-ground-floor joke.
+Nested secret cupboards suit the cupboard-trust-issues joke. The burglar-walk joke requires a long or difficult approach, not merely hidden valuables.
+Reject a pairing that needs the reader to invent an extra event or connection to understand the joke.
+Before selecting, compare your three strongest candidates for factual fit and punchline specificity. Discard word matches that are not situation matches.
+Rank direct callbacks above generic self-deprecation, and generic self-deprecation above certificates, committees, quiz careers, or random tartan.
+Avoid jokes that mock victims, suffering, or the people whose remains are described.
 The real factual sentence is supplied separately and must not be rewritten, restated, contradicted, or embellished.
 Return only a short suffix that follows it. Vary the structure and avoid recent endings.
 The suffix must be at most 90 Unicode characters including spaces and punctuation.
@@ -81,6 +135,11 @@ def request_suffix(
     allowed_suffixes = [suffix for suffix in SAFE_SUFFIXES if len(suffix) <= suffix_budget]
     if not allowed_suffixes:
         raise StyleValidationError("No reviewed suffix fits the complete SMS character budget")
+    fresh_suffixes = [
+        suffix for suffix in allowed_suffixes
+        if not any(sms.endswith(f" {suffix} {SMS_FOOTER}") for sms in recent_sms[:10])
+    ]
+    allowed_suffixes = fresh_suffixes or allowed_suffixes
     payload = {
         "allowed_suffixes": allowed_suffixes,
         "fact_for_context_only": fact_text,
@@ -92,6 +151,7 @@ def request_suffix(
         lambda: client.responses.create(
             model=settings.style_model,
             store=False,
+            reasoning={"effort": "medium"},
             text={
                 "format": {
                     "type": "json_schema",

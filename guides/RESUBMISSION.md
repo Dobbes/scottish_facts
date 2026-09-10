@@ -1,21 +1,21 @@
-# SMS Campaign Resubmission
+# SMS Campaign Registration Guide
 
 ## Status And Tasks
 
-This is an owner field guide, not a submitted campaign or evidence of carrier approval. On September 8, 2026, the owner confirmed the exact registered identity Elumsden Sole, supplied public support brunslx@gmail.com, and authorized commit, push, and GitHub Pages publication. Publication authorization does not authorize SMS sending, production enablement, or Twilio submission. The intended Pages URLs below are NOT yet published or verified by this update. GitHub CLI is not authenticated, so Pages configuration is blocked; Git push can use its separate existing authentication. Do not infer that Pages is enabled or disabled from this blocker.
+This is an operator field guide for carrier registration. Scotland Facts is operated by Elumsden Sole, with public support [brunslx@gmail.com](mailto:brunslx@gmail.com). The public home, privacy, terms, and enrollment pages below were verified accessible without authentication on September 9, 2026. Publication does not establish carrier approval or recipient consent.
 
-The reviewed site and safety changes were committed as `446fada` (`Add verified operator site and messaging safety controls`) and successfully pushed to `origin/main`. Logged-out HTTP checks of all four intended URLs returned 404 on September 8, 2026; the updated site is not verified live. Complete step 2 below to configure Pages, then verify actual deployed content. No Twilio submission, SMS send, production enablement, or secret inspection was performed.
+Use the distinct policy and enrollment URLs in registration fields. A read-only check on September 9, 2026 found the configured sender attached to a messaging service whose A2P campaign status is `VERIFIED`. Keep this guide for future registration changes and provider-response configuration; successful SMS delivery remains a separate check.
 
 - [x] Add dedicated static home, privacy, terms, and verbal-enrollment pages in `docs/`.
 - [x] Add a fixed application-owned STOP footer with complete-message length validation.
 - [x] Supply samples using actual reviewed suffixes, field guidance, and a private consent procedure.
 - [x] Document a manual enrollment-confirmation procedure; no confirmation CLI or automatic confirmation is implemented.
-- [x] Local validation: 175 tests passed; `compileall` and `git diff --check` passed (Git emitted line-ending notices only). Static content/link checks are not a browser rendering or live Pages verification.
+- [x] Local tests validate policy content, navigation, message examples, and safety controls.
 - [x] Owner confirms registered identity Elumsden Sole, its operation of Scotland Facts, public support brunslx@gmail.com, and commit/push/Pages authorization.
 - [x] Commit and push the 30 reviewed site, documentation, safety, migration, and test files to `origin/main`.
-- [ ] Owner publishes reviewed files and verifies all Pages links while logged out.
+- [x] Public home, privacy, terms, and enrollment URLs are accessible without authentication (September 9, 2026).
 - [ ] Owner configures and verifies actual STOP/START/HELP behavior and a supported confirmation procedure.
-- [ ] Owner updates the campaign fields and resubmits, then waits for approval.
+- [x] The attached messaging service's A2P campaign reports `VERIFIED` (September 9, 2026).
 - [ ] Owner completes deployed security, consent, monitoring, and authorization checks before any sending.
 
 Keep `SMS_SEND_ENABLED=false` and `RECIPIENT_CONSENT_CONFIRMED=false` until the applicable consent and authorization steps in `USER_SETUP.md`. This update preserves default-off gates. It does not inspect or change local secrets or hosted sending switches.
@@ -34,13 +34,13 @@ The dependency-free site is under `docs/`; `.nojekyll` makes it a plain static P
 
 1. Review the complete worktree, including prior uncommitted safety changes. Audit intended files for credentials and personal data. Do not use a blanket `git add .`; stage only reviewed, intended files when you decide to commit.
 2. Commit and push the reviewed changes using the owner's explicit authorization. Use normal Git authentication; do not extract credentials or start an unattended interactive login.
-3. GitHub CLI reports `You are not logged into any GitHub hosts.` The owner can run `gh auth login` themselves and then request completion, or use [repository Pages settings](https://github.com/Dobbes/scottish_facts/settings/pages). Choose **Deploy from a branch**, **main**, and **/docs**. Save. Do not change the daily SMS workflow to publish Pages.
+3. For a new deployment, open [repository Pages settings](https://github.com/Dobbes/scottish_facts/settings/pages). Choose **Deploy from a branch**, **main**, and **/docs**. Save. The existing project site is already live. GitHub CLI administration requires `gh auth login` separately from Git authentication.
 4. Wait for the Pages deployment to finish. Read its reported URL; a custom domain or different repository configuration changes the URLs below.
 5. Open each URL in a logged-out/private browser, on desktop and a narrow mobile viewport. Verify HTTP success, readable content, navigation, visible support/privacy/terms links, keyboard focus, and the complete verbal script. Verify that no authentication is needed to read the policies. Check the actual deployed content, not just GitHub's source view.
 
-Intended URLs, NOT yet published or verified:
+Public URLs, verified September 9, 2026:
 
-| Field | Intended URL |
+| Field | Public URL |
 | --- | --- |
 | Website | `https://dobbes.github.io/scottish_facts/` |
 | Privacy Policy | `https://dobbes.github.io/scottish_facts/privacy/` |
@@ -130,4 +130,4 @@ Only perform actual SMS keyword/confirmation tests with explicit owner authoriza
 
 After the above is true, the owner can update the rejected submission with the verified distinct URLs, truthful verbal flow, exact applicable keyword responses, confirmation procedure, and daily samples. Provide the public script as opt-in evidence; submit any requested private consent evidence only through an authorized private provider channel, not GitHub Pages or Issues. Review screenshots for personal data before sharing them.
 
-Wait for Twilio/carrier approval. Then complete migration `002`, deployed RLS/API access checks, persisted dry-run validation, current consent, confirmation handling, and explicit production authorization in `USER_SETUP.md`. This local update does not certify external accounts, deployed security, consent, approval, delivery, or the published site.
+Wait for Twilio/carrier approval. Then complete migration `002`, deployed RLS/API access checks, persisted dry-run validation, current consent, confirmation handling, and production authorization in [USER_SETUP.md](USER_SETUP.md). A working public site and successful connectivity checks do not establish carrier approval or delivery.

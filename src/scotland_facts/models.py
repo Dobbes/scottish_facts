@@ -25,9 +25,6 @@ CATEGORIES = (
     "general_history",
 )
 
-HISTORY_STATUSES = ("SEND_ATTEMPTED", "SUBMITTED", "SENT", "DELIVERED")
-
-
 class RunType(StrEnum):
     DAILY = "DAILY"
     DRY_RUN = "DRY_RUN"

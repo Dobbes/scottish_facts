@@ -242,3 +242,57 @@ def test_ordinary_text_fact_does_not_exhaust_style(monkeypatch):
     assert result.status == RunStatus.SUCCEEDED
     assert fact in result.sms_text
     assert not db.failures
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_concurrent_acceptance_collision_refreshes_context_and_retries(monkeypatch, production_settings, dry_run):
+    db = FakeDatabase()
+    prepare(monkeypatch, [response(0), response(1)])
+    original_accept = db.try_accept_fact
+    acceptance_calls = []
+    contexts = []
+
+    def accept(run_id, record, sms, embedding, status, settings):
+        acceptance_calls.append(record.candidate_fact)
+        if len(acceptance_calls) == 1:
+            record.rejection_code = "RECENT_SUBJECT"
+            record.rejection_reason = "Another preview claimed this subject"
+            db.recent = ["subject 0"]
+            return None
+        return original_accept(run_id, record, sms, embedding, status, settings)
+
+    def research(ai, settings, category, recent, prior, **kwargs):
+        contexts.append((list(recent), list(prior)))
+        return response(len(contexts) - 1)
+
+    db.try_accept_fact = accept
+    db.prior_facts = lambda limit: [FACTS[0]] if acceptance_calls else []
+    monkeypatch.setattr(orchestrator, "request_research", research)
+    monkeypatch.setattr(orchestrator, "reconcile_recent", lambda *args, **kwargs: None)
+    sends = []
+    monkeypatch.setattr(orchestrator, "send_once", lambda *args, **kwargs: sends.append(args[2]))
+    result = run_workflow(production_settings, dry_run=dry_run, db=db, openai_client=object(),
+                          twilio_client=object(), now=NOW)
+    assert result.attempts == 2
+    assert len(db.inserted) == 1
+    assert db.inserted[0][1][1] == FACTS[1]
+    assert not db.attempts[0].accepted
+    assert db.attempts[0].rejection_code == "RECENT_SUBJECT"
+    assert db.attempts[1].accepted
+    assert contexts[1] == (["subject 0"], [FACTS[0]])
+    assert len(sends) == (0 if dry_run else 1)
+
+
+def test_acceptance_collisions_exhaust_without_inserting_or_sending(monkeypatch):
+    db = FakeDatabase()
+    prepare(monkeypatch, [response(i) for i in range(5)])
+    def reject(run_id, record, *args):
+        record.rejection_code = "SEMANTIC_DUPLICATE"
+        record.rejection_reason = "Concurrent paraphrase"
+        return None
+    db.try_accept_fact = reject
+    with pytest.raises(WorkflowError, match="Research exhausted"):
+        run_workflow(Settings(), dry_run=True, db=db, openai_client=object(), now=NOW)
+    assert len(db.attempts) == 5
+    assert all(not record.accepted for record in db.attempts)
+    assert not db.inserted

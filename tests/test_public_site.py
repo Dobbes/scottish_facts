@@ -81,7 +81,7 @@ def test_public_policy_and_enrollment_disclosures():
 
 def test_documented_daily_samples_use_actual_validated_suffixes():
     texts = [path.read_text(encoding="utf-8") for path in PAGES]
-    texts.extend((ROOT / name).read_text(encoding="utf-8") for name in ("README.md", "RESUBMISSION.md"))
+    texts.extend((ROOT / name).read_text(encoding="utf-8") for name in ("README.md", "guides/RESUBMISSION.md"))
     samples = re.findall(
         r'(?:^|<p class="sample">)(SCOTLAND FACTS: [^\n<>]+Reply STOP to opt out\.)',
         "\n".join(texts), re.MULTILINE,
@@ -95,8 +95,8 @@ def test_documented_daily_samples_use_actual_validated_suffixes():
         assert build_sms(fact, suffix, 300) == sample
 
 
-def test_service_templates_and_publication_authorization():
-    guide = (ROOT / "RESUBMISSION.md").read_text(encoding="utf-8")
+def test_service_templates_and_operator_documentation():
+    guide = (ROOT / "guides/RESUBMISSION.md").read_text(encoding="utf-8")
     templates = re.findall(r"```text\n(.*?)\n```", guide, re.DOTALL)
     assert len(templates) == 6
     for template in templates:
@@ -104,14 +104,13 @@ def test_service_templates_and_publication_authorization():
         assert "\n" not in template
     for route in ("privacy/", "terms/", "enrollment/"):
         assert f"https://dobbes.github.io/scottish_facts/{route}" in guide
-    for phrase in ("NOT yet published or verified", "Not implemented in the application",
-                   "ATTEMPTED", "do not click again", "Elumsden Sole", "authorized commit, push",
-                   "brunslx@gmail.com", "GitHub CLI is not authenticated"):
+    for phrase in ("Not implemented in the application", "ATTEMPTED", "do not click again",
+                   "Elumsden Sole", "brunslx@gmail.com"):
         assert phrase in guide
     assert "https://github.com/Dobbes/scottish_facts/issues" not in guide
     for template in (templates[2], templates[4], templates[5]):
         assert "brunslx@gmail.com" in template
-    for name in ("README.md", "USER_SETUP.md", "CLI_SPEC.md"):
+    for name in ("README.md", "guides/USER_SETUP.md", "guides/CLI_SPEC.md"):
         text = (ROOT / name).read_text(encoding="utf-8")
         assert "Scotland Facts is operated by Elumsden Sole" in text
         assert "brunslx@gmail.com" in text

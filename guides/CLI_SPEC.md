@@ -1,8 +1,8 @@
-# Scotland Facts — One-Shot CLI Implementation Specification
+# Scotland Facts — Implementation Specification
 Version: 2.0 (audited for autonomous implementation)
 Status: Implementation-ready
 
-The [Safety Update](#safety-update) records the current production gates, subscription handling, and security requirements and overrides conflicting historical requirements below. README.md, USER_SETUP.md, and RESUBMISSION.md are the current operator references.
+This document preserves the original implementation brief and subsequent design amendments. The [Safety Update](#safety-update) records current production gates, subscription handling, and security requirements and overrides conflicting historical requirements below. The [project overview](../README.md), [deployment guide](USER_SETUP.md), and [campaign guide](RESUBMISSION.md) are the current operator references. File paths in the original brief predate the `guides/` documentation layout.
 
 ## 0. Prime Directive
 
@@ -467,7 +467,7 @@ Create:
   - `SENT`
   - `DELIVERED`
 
-The HNSW index is a portfolio/scale feature. At current tiny row counts Postgres may choose a sequential scan; correctness must not depend on index use.
+The HNSW index is a portfolio/scale feature. Final semantic novelty enforcement must use an exact cosine scan across all persisted facts, not approximate HNSW results. Existing duplicate audit rows remain intact; this policy requires no migration and must not rely on a status-scoped unique index alone.
 
 ### 8.3 `generation_attempts`
 
@@ -632,7 +632,7 @@ Application code chooses it.
 
 Algorithm:
 
-1. Query the most recent `SEND_ATTEMPTED`, `SUBMITTED`, `SENT`, or `DELIVERED` fact for each category.
+1. Query the most recent persisted fact for each category, without filtering by status.
 2. Categories never used are considered oldest.
 3. Sort categories by:
    - never-used first,
@@ -674,7 +674,7 @@ Normalize each subject by:
 
 ### Rejection rule
 
-Retrieve subjects from already/possibly submitted facts whose application status is `SEND_ATTEMPTED`, `SUBMITTED`, `SENT`, or `DELIVERED` within the previous:
+Retrieve subjects from all persisted facts, regardless of status, generated within the previous:
 
 ```text
 RECENT_SUBJECT_WINDOW_DAYS = 14
@@ -690,7 +690,7 @@ This is intentionally simple and strict.
 
 The semantic fact duplicate check remains separate.
 
-Dry-run and failed facts do not contribute to subject fatigue.
+`DRY_RUN`, `PENDING`, `FAILED`, and all delivery statuses contribute to subject fatigue. Rejected attempts do not.
 
 ---
 
@@ -805,7 +805,7 @@ For subjects, return 1–4 stable lowercase canonical tags suitable for repetiti
 User/input content for each attempt must provide:
 - requested category,
 - normalized subjects used during the last 14 days,
-- a concise list of prior sent facts (at minimum the most recent 50, or all if fewer).
+- a concise list of prior persisted facts regardless of status (at minimum the most recent 50, or all if fewer; rejected attempts do not count).
 
 Do not put the recipient phone number or any personal data into the prompt.
 
@@ -904,7 +904,7 @@ SCOTLAND’S NATIONAL ANIMAL IS THE UNICORN!
 
 must normalize identically.
 
-Check the candidate normalized text against facts whose status is `SEND_ATTEMPTED`, `SUBMITTED`, `SENT`, or `DELIVERED`.
+Check the candidate normalized text against all persisted facts, regardless of status or age. This includes previews, pending facts, failed facts, and all delivery statuses, but not rejected attempts.
 
 If exact match:
 - reject,
@@ -947,16 +947,19 @@ Calculate similarity as:
 similarity = 1 - cosine_distance
 ```
 
-Query only facts whose status is:
+Query all persisted facts, including every status:
 
 ```text
+DRY_RUN
+PENDING
+FAILED
 SEND_ATTEMPTED
 SUBMITTED
 SENT
 DELIVERED
 ```
 
-`SEND_ATTEMPTED` is included because an ambiguous transport failure may have created/delivered the Twilio message even when the application never received the SID.
+Content novelty is global across production and previews, independent of delivery outcome and fact age. Rejected attempts are excluded. Final revalidation must use an exact cosine scan under the transaction advisory lock described in section 20, not approximate HNSW results.
 
 Return the top 5 nearest prior facts, ordered by distance ascending.
 
@@ -1015,7 +1018,7 @@ Record the `generation_attempts` row with:
 - rejection reason,
 - similarity data if computed.
 
-Only after all checks pass:
+Only after all checks, style validation, and the atomic final revalidation in section 20 pass:
 - mark attempt `accepted=true`,
 - create the `facts` row.
 
@@ -1039,7 +1042,7 @@ The style stage must **not rewrite the fact**.
 
 Input:
 - the accepted fact,
-- most recent 10 sent SMS messages,
+- most recent 10 persisted SMS messages regardless of fact status (excluding rejected attempts),
 - banned Twilio keywords for fake reply instructions.
 
 Output structured schema:
@@ -1181,11 +1184,17 @@ is rejected. All suffixes outside the exact reviewed prose allowlist are rejecte
 
 Once candidate and style output pass validation:
 
-Insert one `facts` row with:
+In every mode, acquire the same PostgreSQL transaction advisory lock in a short transaction. Revalidate recent 14-day subjects and global exact/semantic novelty against all persisted facts, including commits by concurrent runs, then insert atomically. Use an exact cosine scan for final semantic revalidation, not approximate HNSW search. Keep research, embedding, style, and Twilio calls outside this transaction.
+
+A collision must record the candidate as rejected, insert no fact, and retry research within `MAX_RESEARCH_ATTEMPTS`; exhaustion fails the run without sending. Rejected attempts never contribute to novelty, category ordering, research context, or recent SMS context.
+
+Insert one `facts` row with the production status:
 
 ```text
 status = PENDING
 ```
+
+For a preview, insert `status=DRY_RUN` instead. It consumes the same content novelty but never claims a production daily key or populates delivery fields.
 
 Store:
 - factual sentence,
@@ -1263,7 +1272,7 @@ If the call raises, distinguish two classes:
 
 Never retry either case automatically in the same run.
 
-`SEND_ATTEMPTED` remains part of future exact/semantic duplicate and subject/category history because the recipient may actually have received the message.
+`SEND_ATTEMPTED`, like every persisted fact status, remains part of future exact/semantic duplicate history, recent subjects, category ordering, prior research context, and recent SMS context, regardless of later delivery failure.
 
 ### 21.5 Success
 
@@ -1365,16 +1374,18 @@ Dry run must execute the same logic through final SMS validation:
 10. semantic duplicate
 11. style suffix
 12. final SMS validation
-13. store fact with `status=DRY_RUN`
+13. atomically revalidate novelty and store fact with `status=DRY_RUN` under the shared transaction advisory lock (section 20); collisions consume a research attempt and retry within the limit
 14. mark run SUCCEEDED
 15. print final SMS + source + candidate diagnostics
 
 It must never initialize or call Twilio send.
 
 Dry-run facts:
-- do not count in semantic duplicate history,
-- do not count in subject fatigue,
-- do not affect production category recency.
+- count in global exact/semantic novelty, just like all other persisted fact statuses,
+- count in recent 14-day subjects, category ordering, prior research context, and recent SMS context,
+- never claim the production daily key or populate delivery fields.
+
+Rejected attempts do not count in any of these histories. Print a successful preview only after its fact is committed, so previews cannot repeat content accepted by another run.
 
 ---
 
@@ -1574,8 +1585,8 @@ Mock Responses API objects:
 ### 29.4 Subject fatigue
 - exact normalized subject in 14-day window rejected
 - different subject accepted
-- dry-run fact ignored
-- failed fact ignored
+- dry-run, pending, failed, and delivery-status facts included
+- rejected attempts ignored
 - 15-day-old subject accepted
 
 ### 29.5 Exact duplicate
@@ -1585,7 +1596,8 @@ Mock Responses API objects:
 ### 29.6 Semantic duplicate
 - similarity >= 0.88 rejected
 - similarity < 0.88 accepted
-- only successful/submitted statuses queried
+- all persisted statuses queried, with no age cutoff
+- final semantic revalidation uses an exact cosine scan, not approximate HNSW results
 
 ### 29.7 Style
 - fact is never rewritten because style function returns suffix only
@@ -1602,6 +1614,8 @@ Mock Responses API objects:
 - duplicate production run_key exits no-op
 - two concurrent run starts cannot both own the same run
 - existing failed daily run still prevents later same-day send
+- concurrent preview/production novelty collisions reject and retry within the research limit under a shared transaction advisory lock
+- preview consumes novelty but never the production daily key or delivery fields
 
 ### 29.9 Send boundary
 Mock DB and Twilio:
@@ -1902,6 +1916,6 @@ Current implementation overrides earlier sending/style behavior in this specific
 - Twilio HTTP timeout defaults to 15 seconds with zero transport retries. Initial response state/error is persisted, and terminal failures raise.
 - Apply incremental migration `002_subscription_and_api_security.sql`; `doctor` checks server-only table security and owner runtime access.
 - Daily messages always include fixed `Reply STOP to opt out.` text outside the suffix validator. Style requests reserve its budget; final validation applies the configured limit and a hard 300-character cap, including the footer. Existing persisted message history is not rewritten.
-- `docs/` is a dependency-free static information site, not an enrollment form or application backend. Scotland Facts is operated by Elumsden Sole, with public support brunslx@gmail.com. The owner confirmed that exact registered identity and authorized commit/push/Pages publication on September 8, 2026, not SMS sending or Twilio submission. See RESUBMISSION.md for publication status and the GitHub CLI authentication blocker; intended URLs are not yet published or verified by this update.
+- `docs/` is a dependency-free static information site, not an enrollment form or application backend. Scotland Facts is operated by Elumsden Sole, with public support brunslx@gmail.com. Public home, privacy, terms, and enrollment pages were verified accessible on September 9, 2026. See [RESUBMISSION.md](RESUBMISSION.md) for URLs and provider configuration.
 - Enrollment confirmation is not implemented as a CLI command or automatic send. RESUBMISSION.md documents an explicitly authorized, single-operator manual provider procedure with a private attempt-before-send record and no retries on ambiguity. This does not alter the daily at-most-once send boundary.
 - Provider HELP/STOP/START configuration must be verified for actual from-number sends. No inbound command processing or automatic START renewal is implemented. All operational and public disclosures must reflect these limitations.

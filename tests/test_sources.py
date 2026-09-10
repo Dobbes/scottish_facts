@@ -82,3 +82,29 @@ def test_non_http_source_rejected():
         require_web_sources(
             SimpleNamespace(output=[search_call([{"url": "file:///secret", "title": "bad"}])])
         )
+
+
+@pytest.mark.parametrize("url", ["https://[broken", "https://:80", "not a URL", None])
+def test_malformed_source_url_is_ignored(url):
+    with pytest.raises(SourceExtractionError, match="real web source"):
+        require_web_sources(SimpleNamespace(output=[search_call([{"url": url}])]))
+
+
+@pytest.mark.parametrize("status", ["failed", "in_progress", "incomplete"])
+def test_uncompleted_web_call_does_not_count_as_search(status):
+    call = search_call([{"url": "https://a.example/fact"}])
+    call.status = status
+    with pytest.raises(SourceExtractionError, match="web_search_call"):
+        require_web_sources(SimpleNamespace(output=[call, message_annotation()]))
+
+
+def test_dictionary_response_extracts_metadata_not_json_text():
+    response = {"output": [
+        {"type": "web_search_call", "status": "completed", "action": {
+            "sources": [{"url": "https://a.example/fact", "title": "Actual metadata"}],
+        }},
+        {"type": "message", "content": [{"type": "output_text", "text":
+            '{"source_url": "https://forged.example/"}', "annotations": []}]},
+    ]}
+    sources = require_web_sources(response)
+    assert [source.url for source in sources] == ["https://a.example/fact"]

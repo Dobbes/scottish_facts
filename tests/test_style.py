@@ -10,6 +10,11 @@ def test_style_prompt_states_numeric_suffix_limit():
     assert "at most 90 Unicode characters" in STYLE_PROMPT
 
 
+def test_style_brief_requires_detail_specific_callbacks():
+    assert "swap test" in STYLE_PROMPT
+    assert "absent from the fact" in STYLE_PROMPT
+
+
 def test_style_interface_returns_suffix_and_preserves_fact():
     suffix = validate_suffix("Your compulsory education resumes tomorrow.", 90)
     sms = build_sms(FACT, suffix, 300)
@@ -97,6 +102,7 @@ def test_request_suffix_reserves_footer_budget(base_settings):
 
     def create(**kwargs):
         payloads.append(json.loads(kwargs["input"][1]["content"]))
+        assert kwargs["reasoning"] == {"effort": "medium"}
         assert kwargs["text"]["format"]["schema"]["properties"]["suffix"]["enum"] == payloads[-1]["allowed_suffixes"]
         return SimpleNamespace(output_text=json.dumps({"suffix": SAFE_SUFFIXES[1]}))
 
@@ -112,3 +118,27 @@ def test_request_suffix_reserves_footer_budget(base_settings):
     with pytest.raises(StyleValidationError, match="No reviewed suffix fits"):
         request_suffix(client, settings.model_copy(update={"sms_max_chars": 20}), FACT, [])
     assert len(payloads) == 1
+
+
+@pytest.mark.parametrize("exhausted", [False, True])
+def test_request_suffix_avoids_recent_endings_with_budget_fallback(base_settings, exhausted):
+    import json
+    from types import SimpleNamespace
+    from scotland_facts.style import request_suffix
+
+    budget = 45
+    fitting = [suffix for suffix in SAFE_SUFFIXES if len(suffix) <= budget]
+    recent_suffixes = fitting if exhausted else fitting[:1]
+    assert len(recent_suffixes) <= 10
+    recent_sms = [build_sms(FACT, suffix, 300) for suffix in recent_suffixes]
+    expected = fitting if exhausted else fitting[1:]
+
+    def create(**kwargs):
+        payload = json.loads(kwargs["input"][1]["content"])
+        assert payload["allowed_suffixes"] == expected
+        assert kwargs["text"]["format"]["schema"]["properties"]["suffix"]["enum"] == expected
+        return SimpleNamespace(output_text=json.dumps({"suffix": expected[0]}))
+
+    client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    settings = base_settings.model_copy(update={"style_suffix_max_chars": budget})
+    assert request_suffix(client, settings, FACT, recent_sms) == expected[0]

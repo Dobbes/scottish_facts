@@ -2,11 +2,17 @@
 .env.*
 !.env.example
 .venv/
+# Ignore accidental nested clones (the application lives under src/).
 /scottish_facts/
 RESUME.md
 *.key
 *.pem
 *.p12
+*.pfx
+*.p8
+*.jks
+id_rsa
+id_ed25519
 credentials.json
 service-account*.json
 __pycache__/
@@ -17,3 +23,10 @@ htmlcov/
 *.egg-info/
 build/
 dist/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.ruff_cache/
+coverage.xml
+*.log

@@ -1,4 +1,4 @@
-# Scotland Facts — Specification Audit
+# Scotland Facts — Design Audit
 
 ## Result
 
@@ -37,7 +37,7 @@ The revised `CLI_SPEC.md` removes the major unresolved implementation decisions.
      - cosine distance `<=>`
      - similarity = `1 - distance`
      - threshold 0.88
-     - HNSW cosine index.
+      - HNSW cosine index retained for scale; final novelty enforcement uses an exact cosine scan, not approximate HNSW results.
 
 6. **Subject fatigue behavior was subjective**
    - Revised spec defines exact canonical subject tags.
@@ -68,8 +68,11 @@ The revised `CLI_SPEC.md` removes the major unresolved implementation decisions.
     - Revised spec allows retries for OpenAI/database reads.
     - Twilio message creation has no automatic retry.
 
-14. **Dry-run behavior could contaminate production history**
-    - Revised spec gives dry runs unique keys and excludes them from dedupe/fatigue/category history.
+14. **Previews and concurrent runs could repeat facts**
+    - All persisted facts, including `DRY_RUN`, `PENDING`, `FAILED`, and every delivery status, count for global exact/semantic novelty, recent 14-day subjects, category ordering, prior research context, and recent SMS context. Rejected attempts do not count.
+    - Previews consume content novelty but use unique dry-run keys, never claim a production daily key, and never populate delivery fields.
+    - All modes use a shared PostgreSQL transaction advisory lock for atomic final revalidation and insertion in a short transaction, with external API calls outside the lock. Collisions reject the candidate and retry research within the configured attempt limit.
+    - Existing duplicate audit rows are retained; no migration is needed for this policy.
 
 15. **No explicit prompt-injection handling**
     - Revised research prompt treats web content as untrusted evidence and ignores page instructions.

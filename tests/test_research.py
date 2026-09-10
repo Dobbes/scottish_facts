@@ -48,6 +48,12 @@ def test_research_prompt_forbids_new_discoveries_as_current_events():
     assert "forbidden" in lowered
 
 
+def test_research_brief_prioritizes_supported_comic_details():
+    assert "inherently amusing" in RESEARCH_PROMPT
+    assert "Accuracy outranks humor" in RESEARCH_PROMPT
+    assert "page supporting this exact claim" in RESEARCH_PROMPT
+
+
 @pytest.mark.parametrize(
     "candidate,reason",
     [
