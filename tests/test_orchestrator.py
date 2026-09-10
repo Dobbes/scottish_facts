@@ -71,6 +71,26 @@ def test_recent_subject_rejects_first_then_accepts_second(monkeypatch):
     assert db.attempts[1].accepted is True
 
 
+def test_retry_receives_failure_reason_and_country_tag_does_not_exhaust_research(monkeypatch):
+    import copy
+    db = FakeDatabase()
+    db.recent = ["scotland", "unicorns"]
+    prepare(monkeypatch, [])
+    feedback = []
+
+    def research(*args, **kwargs):
+        feedback.append(copy.deepcopy(kwargs["rejected_candidates"]))
+        return response(0, ["scotland", "unicorns"]) if len(feedback) == 1 else response(1, ["scotland", "orkney flights"])
+
+    monkeypatch.setattr(orchestrator, "request_research", research)
+    result = run_workflow(Settings(), dry_run=True, db=db, openai_client=object(), now=NOW)
+    assert result.attempts == 2
+    assert feedback[0] == []
+    assert feedback[1] == [{"fact": FACTS[0], "subjects": ["unicorns"],
+                            "rejection_code": "RECENT_SUBJECT", "reason": "Subject recently used: unicorns"}]
+    assert db.attempts[1].subjects == ["orkney flights"]
+
+
 def test_semantic_duplicate_rejects_first_then_accepts_second(monkeypatch):
     db = FakeDatabase()
     prior_id = uuid4()

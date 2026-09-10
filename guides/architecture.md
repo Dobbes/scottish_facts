@@ -6,7 +6,7 @@ Scotland Facts is operated by Elumsden Sole. Support: [brunslx@gmail.com](mailto
 
 The public site is served from `docs/` at [dobbes.github.io/scottish_facts](https://dobbes.github.io/scottish_facts/). The home, privacy, terms, and enrollment pages were verified publicly accessible on September 9, 2026. See the [campaign guide](RESUBMISSION.md) for provider configuration.
 
-Scotland Facts is a scheduled Python job that researches one real Scotland fact on the web, rejects repetitive material, adds a short Cat-Facts-style suffix, and sends the result to one consenting recipient through Twilio. Supabase PostgreSQL stores the audit trail, source citations, embeddings, attempts, and delivery state.
+Scotland Facts is a scheduled Python job that researches one real Scotland fact on the web, rejects repetitive material, adds a short Cat-Facts-style suffix, and sends individual copies to up to two consenting recipients through Twilio. Supabase PostgreSQL stores the audit trail, source citations, embeddings, attempts, and per-recipient delivery state. See [two-recipient delivery](delivery.md) for the current ledger, migration, partial-failure, and shared-suppression contracts.
 
 ```text
 SCOTLAND FACTS: Scotland's national animal is the unicorn. The unicorns have declined to comment. Reply STOP to opt out.
@@ -42,10 +42,10 @@ citations + embedding  pgvector similarity
           suffix-only style call
                    |
                    v
-      persist PENDING -> commit SEND_ATTEMPTED
+       persist recipient delivery rows as PENDING
                    |
                    v
-          exactly one Twilio create call
+       for each: commit SEND_ATTEMPTED -> one Twilio create
                    |
                    v
        short status poll + later reconciliation
@@ -63,7 +63,9 @@ Three independent repetition controls are used:
 
 - Exact duplicate detection normalizes Unicode, case, punctuation, quotes, dashes, and whitespace.
 - Semantic duplicate detection embeds only the fact and compares it to all persisted facts with pgvector cosine similarity. The default rejection threshold is `0.88`.
-- Subject fatigue rejects an exact normalized subject used by any persisted fact during the previous 14 days.
+- Subject fatigue rejects an exact normalized specific subject used by any persisted fact during the previous 14 days. Country/feed labels such as `scotland` and category names are excluded so they cannot block unrelated facts. A candidate still needs at least one specific subject. Historical rows remain intact, and the same filtering applies during atomic final acceptance.
+
+Research retries receive prior candidate failures and their reasons, in addition to recent specific subjects and persisted facts. They must choose genuinely different subjects rather than relabel a repeated entity. The configured research-attempt limit, exact/semantic thresholds, and 14-day window remain unchanged.
 
 All persisted facts, including `DRY_RUN`, `PENDING`, `FAILED`, and every delivery status, count toward global exact/semantic novelty, recent 14-day subjects, category ordering, prior research context, and recent SMS context. Rejected attempts do not count. Categories are selected deterministically, with never-used categories first and otherwise least-recently-used first.
 
@@ -73,9 +75,9 @@ In every mode, final novelty revalidation and fact insertion are atomic under a 
 
 The daily Eastern date creates a unique database run key such as `daily:2026-09-06`. A duplicate key is always a successful no-op, including when the earlier run failed. Dry runs use unique `dryrun:` keys. A persisted preview consumes content novelty but never claims a production daily key or populates delivery fields.
 
-After the complete SMS is validated, the fact is committed as `PENDING`. Immediately before Twilio message creation, it is changed to `SEND_ATTEMPTED` and that transaction is committed. Only then does the application make one `messages.create` call. It never automatically retries message creation.
+After the complete SMS is validated, the fact is committed as `PENDING`, then all configured recipient delivery rows are committed. Immediately before each recipient's Twilio message creation, its own ledger row changes to `SEND_ATTEMPTED` and that transaction is committed. Only then does the application make that recipient's one `messages.create` call. It never automatically retries message creation. Legacy fields on `facts` mirror the primary recipient only; consult `sms_deliveries` or the `history` deliveries array for both outcomes.
 
-This deliberately favors a missed message over a duplicate. If a timeout occurs after Twilio may have accepted the request, the fact remains `SEND_ATTEMPTED`, the run fails with `TWILIO_AMBIGUOUS_SEND`, and the same daily key prevents another attempt. Initial Twilio status and error code are persisted with the SID, including terminal failure or delivery. Polling does not discard known state when disabled or when fetching fails. Twilio HTTP requests have a configurable 15-second timeout and zero transport retries; the Actions job has a 15-minute timeout.
+This deliberately favors a missed message over a duplicate. If a timeout occurs after Twilio may have accepted the request, that delivery remains `SEND_ATTEMPTED`; the overall run fails and the same daily key prevents another attempt. The other recipient can still receive its independent attempt unless suppression or a database failure stops execution. Initial Twilio status and error code are persisted with each SID, including terminal failure or delivery. Polling does not discard known state when disabled or when fetching fails. Twilio HTTP requests have a configurable 15-second timeout and zero transport retries; the Actions job has a 15-minute timeout.
 
 `SMS_SEND_ENABLED` and `RECIPIENT_CONSENT_CONFIRMED` both default to `false`. CLI, workflow, and the send boundary require both for production; dry runs are unaffected. A phone-free singleton subscription record blocks generation and sending after manual suppression or observed Twilio error `21610`. Configuration changes and carrier opt-in never automatically clear database suppression. See the explicit renewal procedure in [USER_SETUP.md](USER_SETUP.md).
 
@@ -93,6 +95,8 @@ This deliberately favors a missed message over a duplicate. If a timeout occurs 
 Operational, GIN, partial unique, and HNSW cosine indexes remain in place, but final novelty enforcement uses the locked exact checks rather than approximate HNSW search or the status-scoped unique index alone. Existing duplicate audit rows are retained; this novelty policy requires no migration.
 
 Apply incremental `002_subscription_and_api_security.sql` to existing installations. It adds `subscription_state`, enables RLS on all five server-only tables including `schema_migrations`, and revokes public and existing `anon`, `authenticated`, and `service_role` API privileges. Absent Supabase roles are skipped for generic PostgreSQL. Use the trusted table-owner PostgreSQL login for migrations and runtime; do not use API roles. RLS is not forced, so owner access is retained. `doctor` validates RLS, API role privileges, and runtime ownership. These checks must still be run against the deployment; local tests do not prove deployed security.
+
+Migration `003_recipient_deliveries.sql` adds the sixth server-only table, `sms_deliveries`, with the same RLS/API-role protections. It backfills historical primary production deliveries without making previews or historical secondary deliveries sendable. Apply all migrations before running the upgraded application.
 
 ## Local Setup
 

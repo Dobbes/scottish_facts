@@ -31,7 +31,7 @@ class SendDB:
         self.status = None
         self.sid = None
 
-    def mark_send_attempted(self, fact_id):
+    def mark_send_attempted(self, fact_id, recipient_slot="primary"):
         self.trace.append("commit_send_attempted")
         self.status = FactStatus.SEND_ATTEMPTED
 

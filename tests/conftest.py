@@ -25,8 +25,8 @@ def production_settings() -> Settings:
         twilio_account_sid="test-account-sid",
         twilio_api_key_sid="test-api-key-sid",
         twilio_api_key_secret="test-secret",
-        twilio_from_number="TEST_SENDER",
-        recipient_number="TEST_RECIPIENT",
+        twilio_from_number="+1" + "2025550100",
+        recipient_number="+1" + "2025550101",
         twilio_status_poll_seconds=0,
     )
 
@@ -116,6 +116,10 @@ class FakeDatabase:
 
     def complete_run(self, run_id, status=None):
         self.completed.append(run_id)
+
+    def prepare_deliveries(self, fact_id, slots):
+        self.trace.append("prepare_deliveries")
+        return [(uuid4(), slot) for slot in slots]
 
     def fail_run(self, run_id, code, reason):
         self.failures.append((code, reason))

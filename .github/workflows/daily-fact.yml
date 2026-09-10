@@ -31,6 +31,7 @@ jobs:
       TWILIO_API_KEY_SECRET: ${{ secrets.TWILIO_API_KEY_SECRET }}
       TWILIO_FROM_NUMBER: ${{ secrets.TWILIO_FROM_NUMBER }}
       RECIPIENT_NUMBER: ${{ secrets.RECIPIENT_NUMBER }}
+      FATHER_IN_LAW_NUMBER: ${{ secrets.FATHER_IN_LAW_NUMBER }}
       SMS_SEND_ENABLED: ${{ vars.SMS_SEND_ENABLED || 'false' }}
       RECIPIENT_CONSENT_CONFIRMED: ${{ vars.RECIPIENT_CONSENT_CONFIRMED || 'false' }}
     steps:

@@ -51,12 +51,15 @@ def doctor(settings: Settings, live: bool = False) -> int:
         "twilio_api_key_secret",
         "twilio_from_number",
         "recipient_number",
+        "father_in_law_number",
     )
     for name in secret_names:
         print(f"{name.upper()}: {'present' if getattr(settings, name) else 'not set'}")
     print("Configuration: OK")
     print(f"SMS sending enabled: {settings.sms_send_enabled}")
     print(f"Recipient consent confirmed: {settings.recipient_consent_confirmed}")
+    slots = settings.recipient_slots()
+    print(f"Configured recipients: {len(slots)} ({', '.join(slots) or 'none'})")
 
     if settings.supabase_db_url:
         try:
@@ -72,11 +75,11 @@ def doctor(settings: Settings, live: bool = False) -> int:
                         """
                         select table_name from information_schema.tables
                         where table_schema = 'public' and table_name in
-                          ('generation_runs', 'facts', 'generation_attempts', 'schema_migrations', 'subscription_state')
+                          ('generation_runs', 'facts', 'generation_attempts', 'schema_migrations', 'subscription_state', 'sms_deliveries')
                         """
                     ).fetchall()
                 }
-                expected = {"generation_runs", "facts", "generation_attempts", "schema_migrations", "subscription_state"}
+                expected = {"generation_runs", "facts", "generation_attempts", "schema_migrations", "subscription_state", "sms_deliveries"}
                 structure_ok = vector and expected <= tables
                 print(f"Database connection: OK")
                 print(f"Database migration: {'OK' if structure_ok else 'MISSING'}")

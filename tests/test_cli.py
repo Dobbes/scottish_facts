@@ -91,7 +91,7 @@ def test_doctor_checks_deployment_security_without_provider_calls(monkeypatch, s
             queries.append(sql)
             if "information_schema.tables" in sql:
                 return SimpleNamespace(fetchall=lambda: [(name,) for name in (
-                    "facts", "generation_runs", "generation_attempts", "schema_migrations", "subscription_state")])
+                    "facts", "generation_runs", "generation_attempts", "schema_migrations", "subscription_state", "sms_deliveries")])
             return SimpleNamespace(fetchone=lambda: (secured,) if "bool_and" in sql else (1,))
 
     monkeypatch.setattr(cli.psycopg, "connect", lambda url: Connection())

@@ -34,6 +34,19 @@ def test_research_request_uses_required_web_search_and_schema(base_settings):
     assert responses.kwargs["reasoning"] == {"effort": "low"}
 
 
+def test_research_receives_specific_recent_subjects_and_rejection_feedback(base_settings):
+    responses = Responses()
+    feedback = [{"fact": "A rejected claim.", "subjects": ["orkney"],
+                 "rejection_code": "RECENT_SUBJECT", "reason": "Subject recently used: orkney"}]
+    request_research(SimpleNamespace(responses=responses), base_settings, "islands",
+                     ["Scotland", "islands", "Orkney", "orkney"], ["Prior accepted fact."],
+                     rejected_candidates=feedback)
+    payload = json.loads(responses.kwargs["input"][1]["content"])
+    assert payload["subjects_used_in_previous_window"] == ["orkney"]
+    assert payload["rejected_candidates"] == feedback
+    assert payload["prior_generated_facts"] == ["Prior accepted fact."]
+
+
 def test_research_prompt_contains_injection_defenses():
     lowered = RESEARCH_PROMPT.lower()
     assert "untrusted evidence" in lowered

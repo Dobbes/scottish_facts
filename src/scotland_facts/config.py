@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -49,6 +50,7 @@ class Settings(BaseModel):
     twilio_api_key_secret: SecretStr | None = None
     twilio_from_number: SecretStr | None = None
     recipient_number: SecretStr | None = None
+    father_in_law_number: SecretStr | None = None
 
     @field_validator("app_timezone")
     @classmethod
@@ -93,6 +95,12 @@ class Settings(BaseModel):
         missing = [name.upper() for name in required[mode] if not getattr(self, name)]
         if missing:
             raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+        if mode in {ConfigMode.DOCTOR, ConfigMode.DRY_RUN, ConfigMode.PRODUCTION}:
+            self.recipient_slots()
+            for name in ("twilio_from_number", "recipient_number", "father_in_law_number"):
+                value = getattr(self, name)
+                if value and not re.fullmatch(r"\+[1-9][0-9]{7,14}", value.get_secret_value()):
+                    raise ValueError(f"{name.upper()} must use E.164 phone format")
         if mode == ConfigMode.PRODUCTION:
             self.require_sending()
         return self
@@ -101,7 +109,27 @@ class Settings(BaseModel):
         if not self.sms_send_enabled:
             raise ValueError("SMS_SEND_ENABLED must be true for production sending")
         if not self.recipient_consent_confirmed:
-            raise ValueError("RECIPIENT_CONSENT_CONFIRMED must be true for production sending")
+            raise ValueError("RECIPIENT_CONSENT_CONFIRMED must be true for all configured recipients")
+
+    def recipient_slots(self) -> tuple[str, ...]:
+        """Return stable, phone-free delivery identities; never silently duplicate a send."""
+        if self.father_in_law_number and not self.recipient_number:
+            raise ValueError("RECIPIENT_NUMBER is required when FATHER_IN_LAW_NUMBER is configured")
+        slots = tuple(slot for slot, field in (
+            ("primary", "recipient_number"), ("secondary", "father_in_law_number")
+        ) if getattr(self, field))
+        values = [self.recipient_secret(slot) for slot in slots]
+        if len(values) != len(set(values)):
+            raise ValueError("Configured recipient numbers must be distinct")
+        if self.twilio_from_number and self.secret("twilio_from_number") in values:
+            raise ValueError("A recipient number must not equal TWILIO_FROM_NUMBER")
+        return slots
+
+    def recipient_secret(self, slot: str) -> str:
+        fields = {"primary": "recipient_number", "secondary": "father_in_law_number"}
+        if slot not in fields:
+            raise ValueError("Unknown recipient slot")
+        return self.secret(fields[slot])
 
     def secret(self, name: str) -> str:
         value = getattr(self, name)
@@ -135,6 +163,7 @@ ENV_FIELDS = {
     "TWILIO_API_KEY_SECRET": "twilio_api_key_secret",
     "TWILIO_FROM_NUMBER": "twilio_from_number",
     "RECIPIENT_NUMBER": "recipient_number",
+    "FATHER_IN_LAW_NUMBER": "father_in_law_number",
 }
 
 
@@ -144,7 +173,7 @@ def load_settings(mode: ConfigMode = ConfigMode.DOCTOR) -> Settings:
     register_secrets([str(value) for field, value in values.items()
                       if field in {"openai_api_key", "supabase_db_url", "twilio_account_sid",
                                    "twilio_api_key_sid", "twilio_api_key_secret",
-                                   "twilio_from_number", "recipient_number"}])
+                                    "twilio_from_number", "recipient_number", "father_in_law_number"}])
     operational_fields = {
         ConfigMode.SUPPRESS: {"supabase_db_url"},
         ConfigMode.RENEW: {"supabase_db_url", "sms_send_enabled", "recipient_consent_confirmed"},

@@ -38,5 +38,6 @@ def test_workflow_has_read_only_permissions_and_all_secrets():
         "TWILIO_API_KEY_SECRET",
         "TWILIO_FROM_NUMBER",
         "RECIPIENT_NUMBER",
+        "FATHER_IN_LAW_NUMBER",
     ):
         assert f"secrets.{name}" in workflow

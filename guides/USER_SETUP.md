@@ -2,6 +2,8 @@
 
 This is the current owner checklist for moving the completed code from local validation to production. Complete it in order. Do not place any credential or phone number in this repository, an issue, a commit message, or chat output.
 
+**Two-recipient deployment:** Start with [delivery.md](delivery.md). Migration `003` is required. The legacy fact-level delivery fields in this checklist refer to the primary recipient; verify both outcomes in `sms_deliveries`. `RECIPIENT_CONSENT_CONFIRMED` confirms consent for every configured recipient, and suppression pauses both.
+
 ## Current Status
 
 Scotland Facts is operated by Elumsden Sole. Public support: [brunslx@gmail.com](mailto:brunslx@gmail.com). The [public site](https://dobbes.github.io/scottish_facts/) and its privacy, terms, and enrollment pages were verified accessible without authentication on September 9, 2026. For carrier registration and service-response templates, see [RESUBMISSION.md](RESUBMISSION.md). Enrollment confirmation is **not implemented in the CLI**; the guide describes the manual provider procedure.
@@ -15,7 +17,7 @@ Deployment checks on September 9, 2026 confirmed the database connection, requir
 3. Click the green **Run workflow** button. Open the new manual run and its **daily-fact** job.
 4. Confirm **Run manual dry-run** actually ran and succeeded. A green scheduled run with production skipped does not validate OpenAI research.
 5. After a successful dry run and confirmed recipient consent, open [Actions variables](https://github.com/Dobbes/scottish_facts/settings/variables/actions). Set `RECIPIENT_CONSENT_CONFIRMED=true` and then `SMS_SEND_ENABLED=true` to authorize daily delivery.
-6. The next scheduled run targets 10:15 AM America/New_York. GitHub may start it late. Production uses only `RECIPIENT_NUMBER`; additional number secrets are unused.
+6. The next scheduled run targets 10:15 AM America/New_York. GitHub may start it late. Production uses `RECIPIENT_NUMBER` plus optional `FATHER_IN_LAW_NUMBER`; doctor must report **Configured recipients: 2 (primary, secondary)** for the two-person deployment.
 
 Keep active credentials in Actions secrets throughout this procedure. No local OpenAI key is needed. Review incoming opt-outs and support requests before scheduled sends, as described below.
 
@@ -136,7 +138,7 @@ In Supabase, verify:
 
 - `schema_migrations` contains both `001_initial.sql` and `002_subscription_and_api_security.sql` once.
 - `generation_runs`, `facts`, `generation_attempts`, and `subscription_state` exist.
-- All five public tables have RLS enabled and no grants to PUBLIC or existing `anon`, `authenticated`, or `service_role` roles. Confirm actual REST/API access is denied using your deployment's API credentials, without exposing them in logs.
+- All six public tables, including `sms_deliveries` from migration `003`, have RLS enabled and no grants to PUBLIC or existing `anon`, `authenticated`, or `service_role` roles. Confirm actual REST/API access is denied using your deployment's API credentials, without exposing them in logs.
 - The runtime owner can read/write these tables (verify via persisted dry run); no public-access RLS policies were added.
 - The `vector` extension exists in the `extensions` schema.
 - `facts.embedding` is `extensions.vector(1536)`.
@@ -269,7 +271,7 @@ On STOP or any direct opt-out request:
 1. Set `SMS_SEND_ENABLED=false` and `RECIPIENT_CONSENT_CONFIRMED=false` locally and in GitHub repository variables. Disable the workflow and let any in-flight job finish; an already submitted message cannot be recalled.
 2. Run `python -m scotland_facts.cli subscription suppress` with database credentials. Verify success. If the database is unavailable, keep the workflow disabled and retry suppression when available.
 3. Remove `RECIPIENT_NUMBER` from local configuration and GitHub Actions secrets. Never post the number in a support issue.
-4. Retain only the private consent/withdrawal record needed for operations. The database suppression row stores no phone and applies to the whole single-recipient installation.
+4. Retain only the private consent/withdrawal record needed for operations. The database suppression row stores no phone and applies to both recipients. Remove the withdrawing recipient's secret; confirm consent for every remaining configured recipient before explicit renewal.
 
 Renewal is never automatic, even after START/UNSTOP or a configuration change:
 
@@ -319,9 +321,10 @@ TWILIO_API_KEY_SID
 TWILIO_API_KEY_SECRET
 TWILIO_FROM_NUMBER
 RECIPIENT_NUMBER
+FATHER_IN_LAW_NUMBER
 ```
 
-Use GitHub Actions secrets, not repository variables. Do not add model defaults as secrets unless you intentionally want to override them.
+Use GitHub Actions secrets, not repository variables. `FATHER_IN_LAW_NUMBER` is optional; it enables the second recipient. Do not add model defaults as secrets unless you intentionally want to override them.
 
 Separately create the non-secret repository variables `SMS_SEND_ENABLED=false` and `RECIPIENT_CONSENT_CONFIRMED=false`. Only set them to `true` at the documented consent/authorization steps. Missing variables remain off. Match these switches in local `.env` when operating locally; GitHub variables do not control a local process.
 
@@ -422,7 +425,7 @@ Recipient device:
 
 Twilio Console:
 
-- exactly one Message resource was created,
+- exactly one Message resource was created for each configured recipient,
 - SID and final carrier status are visible,
 - no unexpected retry or duplicate exists.
 

@@ -282,25 +282,62 @@ class Database:
             self.record_attempt(run_id, record, commit=False)
         return fact_id
 
-    def mark_send_attempted(self, fact_id: UUID) -> None:
+    def prepare_deliveries(self, fact_id: UUID, slots: tuple[str, ...]) -> list[tuple[UUID, str]]:
+        """Commit the complete fan-out before any provider call; never prepare a preview."""
+        if not slots or len(set(slots)) != len(slots) or set(slots) - {"primary", "secondary"}:
+            raise ValueError("Invalid recipient slots")
+        self.conn.commit()
+        deliveries = []
+        with self.conn.transaction():
+            for slot in slots:
+                delivery_id = uuid4()
+                cursor = self.conn.execute(
+                    """
+                    insert into sms_deliveries (id, fact_id, recipient_slot, status)
+                    select %s, id, %s, 'PENDING' from facts
+                    where id = %s and status = 'PENDING' and send_attempted_at is null
+                    """, (delivery_id, slot, fact_id),
+                )
+                if cursor.rowcount != 1:
+                    raise RuntimeError("Fact is not eligible for production deliveries")
+                deliveries.append((delivery_id, slot))
+        return deliveries
+
+    def _sync_primary_fact(self, delivery_id: UUID) -> None:
+        # Legacy fact delivery columns describe only the primary recipient.
+        # sms_deliveries is authoritative for all sending and reconciliation.
+        self.conn.execute(
+            """
+            update facts f set status = d.status, send_attempted_at = d.send_attempted_at,
+                twilio_sid = d.twilio_sid, twilio_status = d.twilio_status,
+                twilio_error_code = d.twilio_error_code, sent_at = d.sent_at,
+                delivered_at = d.delivered_at
+            from sms_deliveries d
+            where d.id = %s and d.recipient_slot = 'primary' and f.id = d.fact_id
+            """, (delivery_id,),
+        )
+
+    def mark_send_attempted(self, fact_id: UUID, recipient_slot: str = "primary") -> None:
         cursor = self.conn.execute(
             """
-            update facts set status = 'SEND_ATTEMPTED', send_attempted_at = now()
+            update sms_deliveries set status = 'SEND_ATTEMPTED', send_attempted_at = now()
             where id = %s and status = 'PENDING' and send_attempted_at is null
+              and recipient_slot = %s
               and exists (select 1 from subscription_state where id = true and not suppressed)
             """,
-            (fact_id,),
+            (fact_id, recipient_slot),
         )
         if cursor.rowcount != 1:
             self.conn.rollback()
-            raise RuntimeError("Fact is not eligible for its one allowed Twilio create attempt")
+            raise RuntimeError("Delivery is not eligible for its one allowed Twilio create attempt")
+        self._sync_primary_fact(fact_id)
         self.conn.commit()
 
     def mark_submitted(self, fact_id: UUID, sid: str, twilio_status: str,
                        app_status: FactStatus, error_code: int | None = None) -> None:
-        self.conn.execute(
+        cursor = self.conn.execute(
             """
-            update facts set status = %s, twilio_sid = %s, twilio_status = %s,
+            update sms_deliveries set status = %s, twilio_sid = %s, twilio_status = %s,
                 twilio_error_code = %s,
                 sent_at = case when %s = 'SENT' then now() else sent_at end,
                 delivered_at = case when %s = 'DELIVERED' then now() else delivered_at end
@@ -309,6 +346,10 @@ class Database:
             (app_status.value, sid, twilio_status, error_code,
              app_status.value, app_status.value, fact_id),
         )
+        if cursor.rowcount != 1:
+            self.conn.rollback()
+            raise RuntimeError("Could not persist Twilio response for attempted delivery")
+        self._sync_primary_fact(fact_id)
         self.conn.commit()
 
     def update_twilio_status(
@@ -320,20 +361,22 @@ class Database:
     ) -> None:
         self.conn.execute(
             """
-            update facts set status = %s, twilio_status = %s, twilio_error_code = %s,
+            update sms_deliveries set status = %s, twilio_status = %s, twilio_error_code = %s,
                 sent_at = case when %s = 'SENT' and sent_at is null then now() else sent_at end,
                 delivered_at = case when %s = 'DELIVERED' then now() else delivered_at end
             where id = %s
             """,
             (app_status.value, twilio_status, error_code, app_status.value, app_status.value, fact_id),
         )
+        self._sync_primary_fact(fact_id)
         self.conn.commit()
 
     def mark_definitive_send_failure(self, fact_id: UUID, error_code: int | None) -> None:
         self.conn.execute(
-            "update facts set status = 'FAILED', twilio_error_code = %s where id = %s",
+            "update sms_deliveries set status = 'FAILED', twilio_error_code = %s where id = %s",
             (error_code, fact_id),
         )
+        self._sync_primary_fact(fact_id)
         self.conn.commit()
 
     def complete_run(self, run_id: UUID, status: RunStatus = RunStatus.SUCCEEDED) -> None:
@@ -357,18 +400,22 @@ class Database:
     def reconciliation_candidates(self) -> list[dict[str, Any]]:
         return self.conn.execute(
             """
-            select id, twilio_sid, status from facts
+            select id, fact_id, recipient_slot, twilio_sid, status from sms_deliveries
             where (status in ('SUBMITTED', 'SENT') and twilio_sid is not null)
                or status = 'SEND_ATTEMPTED'
-            order by generated_at
+            order by created_at
             """,
         ).fetchall()
 
     def history(self, limit: int) -> list[dict[str, Any]]:
         return self.conn.execute(
             """
-            select generated_at, status, category, fact_text, source_url, twilio_status
-            from facts order by generated_at desc limit %s
+            select f.generated_at, f.status, f.category, f.fact_text, f.source_url, f.twilio_status,
+                coalesce((select jsonb_agg(jsonb_build_object(
+                    'recipient_slot', d.recipient_slot, 'status', d.status,
+                    'twilio_status', d.twilio_status, 'twilio_error_code', d.twilio_error_code
+                ) order by d.recipient_slot) from sms_deliveries d where d.fact_id = f.id), '[]'::jsonb) as deliveries
+            from facts f order by f.generated_at desc limit %s
             """,
             (limit,),
         ).fetchall()

@@ -31,19 +31,21 @@ flowchart LR
 
 | Layer | Responsibility |
 | --- | --- |
-| Research | OpenAI web search, structured candidates, and citations extracted from tool metadata |
-| Validation | Source checks, normalized exact duplicates, semantic similarity, and 14-day subject fatigue |
+| Preflight | Validate configuration and consent switches, claim a unique daily run key, check suppression, and reconcile outstanding deliveries |
+| Research | Choose a least-recently-used category; use OpenAI web search, structured candidates, and citations extracted from tool metadata |
+| Validation | Check source metadata, exact duplicates, semantic similarity, and specific subjects used in the last 14 days; give rejected-candidate feedback to bounded retries |
 | Composition | An unchanged factual sentence, a reviewed suffix, and a fixed STOP footer; 300 characters maximum |
 | Persistence | PostgreSQL audit records, pgvector embeddings, and atomic final novelty checks |
-| Delivery | One Twilio create attempt per daily run, with committed send state and later reconciliation |
+| Delivery | One Twilio create attempt per recipient per daily run, with individual committed send states and later reconciliation |
 | Scheduling | GitHub Actions at **10:15 AM America/New_York**, following daylight-saving changes |
 
 ### Designed for reliable side effects
 
-- **At-most-once sending.** A unique daily run key and a committed send boundary
+- **At-most-once sending.** A unique daily run key and a committed per-recipient send boundary
   prevent automatic duplicate sends, even after a timeout.
 - **Fresh content.** Exact, semantic, and subject-based repetition checks include
-  persisted previews as well as production facts.
+  persisted previews as well as production facts. Feed-wide labels such as
+  “Scotland” and category names are excluded from subject-fatigue checks.
 - **Separated fact and humor.** The style step selects a reviewed suffix; it cannot
   rewrite the accepted fact or opt-out instruction.
 - **Private recipient configuration.** Phone numbers stay in restricted
@@ -85,6 +87,7 @@ OPENAI_API_KEY             SUPABASE_DB_URL
 TWILIO_ACCOUNT_SID         TWILIO_API_KEY_SID
 TWILIO_API_KEY_SECRET      TWILIO_FROM_NUMBER
 RECIPIENT_NUMBER
+FATHER_IN_LAW_NUMBER       (optional second recipient)
 ```
 
 The non-secret repository **variables** `SMS_SEND_ENABLED` and
@@ -92,9 +95,12 @@ The non-secret repository **variables** `SMS_SEND_ENABLED` and
 recipient consent, and a successful Actions dry run, enable both for daily delivery.
 Manual workflow runs default to dry-run mode.
 
-The current version supports **one recipient**. An additional phone-number secret
-does not add another recipient. GitHub scheduling is best-effort rather than an
-exact delivery-time guarantee.
+The current version supports **up to two recipients**. Set `FATHER_IN_LAW_NUMBER`
+to add the second recipient. Both receive the **same fact in separate messages**;
+phone values must be distinct. `RECIPIENT_CONSENT_CONFIRMED=true` confirms consent
+for **both configured recipients**. See [two-recipient delivery](guides/delivery.md)
+for migration, partial failures, and shared suppression. GitHub scheduling is
+best-effort rather than an exact delivery-time guarantee.
 
 ## Repository map
 
@@ -130,6 +136,7 @@ dependency versions are recorded in `requirements.lock`.
 ## Documentation
 
 - [Architecture and operational guarantees](guides/architecture.md)
+- [Two-recipient delivery and migration](guides/delivery.md)
 - [Deployment and operator guide](guides/USER_SETUP.md)
 - [SMS campaign registration guide](guides/RESUBMISSION.md)
 - [Implementation specification](guides/CLI_SPEC.md) and [design audit](guides/SPEC_AUDIT.md)

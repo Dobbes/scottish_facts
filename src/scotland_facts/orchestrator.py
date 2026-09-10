@@ -73,6 +73,10 @@ def run_workflow(
 ) -> WorkflowResult:
     if not dry_run:
         settings.require_sending()
+        if not settings.recipient_slots():
+            raise ValueError("At least one recipient is required")
+    else:
+        settings.recipient_slots()
     owns_db = db is None
     database = db or Database.connect(settings)
     run_type = RunType.DRY_RUN if dry_run else RunType.DAILY
@@ -140,12 +144,21 @@ def _execute_owned(
     prior_facts = db.prior_facts(50)
 
     fact_id = None
+    rejected_candidates: list[dict[str, Any]] = []
     for attempt_number in range(1, settings.max_research_attempts + 1):
+        if attempt_number > 1:
+            rejected_candidates.append({
+                "fact": record.candidate_fact,
+                "subjects": record.subjects,
+                "rejection_code": record.rejection_code,
+                "reason": record.rejection_reason,
+            })
         category = categories[(attempt_number - 1) % len(categories)]
         record = AttemptRecord(attempt_number=attempt_number, category=category)
         try:
             response = request_research(
-                ai, settings, category, recent_subjects, prior_facts, sleep=sleep
+                ai, settings, category, recent_subjects, prior_facts, sleep=sleep,
+                rejected_candidates=rejected_candidates,
             )
         except Exception as exc:
             db.fail_run(run_id, "OPENAI_RESEARCH_ERROR", redact(exc))
@@ -271,18 +284,23 @@ def _execute_owned(
         )
 
     assert twilio is not None
-    try:
-        send_once(
-            db,
-            fact_id,
-            sms_text,
-            settings,
-            twilio,
-            sleep=sleep,
-            monotonic=monotonic,
-        )
-    except TwilioSendError as exc:
-        db.fail_run(run_id, exc.failure_code, redact(exc))
+    deliveries = db.prepare_deliveries(fact_id, settings.recipient_slots())
+    failures: list[TwilioSendError] = []
+    for delivery_id, slot in deliveries:
+        try:
+            send_once(
+                db, delivery_id, sms_text, settings, twilio,
+                sleep=sleep, monotonic=monotonic, recipient_slot=slot,
+            )
+            LOGGER.info("Delivery submitted recipient_slot=%s delivery_id=%s", slot, delivery_id)
+        except TwilioSendError as exc:
+            # Independent delivery boundaries: never replay a successful/ambiguous
+            # recipient to recover a different recipient's failure.
+            failures.append(exc)
+            LOGGER.error("Delivery failed recipient_slot=%s code=%s", slot, exc.failure_code)
+    if failures:
+        exc = failures[0]
+        db.fail_run(run_id, exc.failure_code, f"{len(failures)} recipient delivery attempt(s) failed: {redact(exc)}")
         raise WorkflowError(redact(exc)) from exc
     db.complete_run(run_id)
     return WorkflowResult(

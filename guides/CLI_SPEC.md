@@ -2,6 +2,8 @@
 Version: 2.0 (audited for autonomous implementation)
 Status: Implementation-ready
 
+**Current delivery amendment:** [Two-recipient delivery](delivery.md) supersedes the original V1 single-recipient schema and sending sections below. Production now uses a private per-recipient `sms_deliveries` ledger; `facts` delivery fields mirror the primary slot only. All other novelty and daily-key guarantees remain in force.
+
 This document preserves the original implementation brief and subsequent design amendments. The [Safety Update](#safety-update) records current production gates, subscription handling, and security requirements and overrides conflicting historical requirements below. The [project overview](../README.md), [deployment guide](USER_SETUP.md), and [campaign guide](RESUBMISSION.md) are the current operator references. File paths in the original brief predate the `guides/` documentation layout.
 
 ## 0. Prime Directive

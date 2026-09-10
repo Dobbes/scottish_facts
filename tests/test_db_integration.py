@@ -65,12 +65,16 @@ def private_database():
         admin.execute(
             sql.SQL("REVOKE ALL ON SCHEMA {} FROM PUBLIC").format(sql.Identifier(schema))
         )
-        for table in ("generation_runs", "facts", "generation_attempts"):
+        tables = ("generation_runs", "facts", "generation_attempts", "sms_deliveries", "subscription_state")
+        for table in tables:
             admin.execute(
                 sql.SQL("CREATE TABLE {} (LIKE {} INCLUDING ALL)").format(
                     sql.Identifier(schema, table), sql.Identifier("public", table)
                 )
             )
+        admin.execute(sql.SQL("INSERT INTO {} (id, suppressed) VALUES (true, false)").format(
+            sql.Identifier(schema, "subscription_state")
+        ))
         admin.commit()
         created = True
 
@@ -80,7 +84,7 @@ def private_database():
             workers.append(conn)
             isolated = IsolatedConnection(conn, schema)
             # Fail before exercising Database if any relation resolves outside the clone.
-            for table in ("generation_runs", "facts", "generation_attempts"):
+            for table in tables:
                 row = isolated.execute(
                     "SELECT %s::regclass::oid = %s::regclass::oid AS isolated",
                     (table, f"{schema}.{table}"),
@@ -171,6 +175,18 @@ def test_cosine_scan_is_exact_even_with_restrictive_hnsw_search(private_database
     matches = db.nearest_facts(vector(), limit=10)
     assert [item[0] for item in matches] == [item[0] for item in expected[:10]]
     assert [item[1] for item in matches] == pytest.approx([item[1] for item in expected[:10]])
+
+
+def test_atomic_novelty_ignores_legacy_context_tags_but_keeps_specific_subjects(private_database):
+    db = private_database()
+    old = candidate("A fact about beavers.", "beavers")
+    old.subjects = ["scotland", "wildlife", "beavers"]
+    seed(db, old, vector(), FactStatus.DRY_RUN)
+    fresh = candidate("An unrelated fact about hen harriers.", "hen harriers")
+    assert db.try_accept_fact(start(db), fresh, "Preview", vector(1), FactStatus.DRY_RUN, Settings())
+    repeated = candidate("A different fact about beavers.", "beavers")
+    assert db.try_accept_fact(start(db), repeated, "Preview", vector(2), FactStatus.DRY_RUN, Settings()) is None
+    assert repeated.rejection_code == "RECENT_SUBJECT"
 
 
 @pytest.mark.parametrize("status", list(FactStatus))

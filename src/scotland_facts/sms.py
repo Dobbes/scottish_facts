@@ -61,15 +61,20 @@ def send_once(
     client: Any,
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
+    *,
+    recipient_slot: str = "primary",
 ) -> tuple[str, FactStatus]:
     settings.require_sending()
+    if recipient_slot not in settings.recipient_slots():
+        raise ValueError("Delivery recipient is not configured")
+    recipient = settings.recipient_secret(recipient_slot)
     db.require_subscription()
-    db.mark_send_attempted(fact_id)
+    db.mark_send_attempted(fact_id, recipient_slot)
     try:
         message = client.messages.create(
             body=sms_text,
             from_=settings.secret("twilio_from_number"),
-            to=settings.secret("recipient_number"),
+            to=recipient,
             smart_encoded=True,
         )
     except TwilioRestException as exc:
